@@ -11,6 +11,32 @@ import pyqtgraph as pg
 import numpy as np
 import random
 
+
+ACTUATOR_CONFIG = {
+    "LRA": {
+        "text_vertical_offset": -1,
+        "text_horizontal_offset": 0.5,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
+    },
+    "VCA": {
+        "text_vertical_offset": -1,
+        "text_horizontal_offset": 0.5,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
+    },
+    "M": {
+        "text_vertical_offset": -1,
+        "text_horizontal_offset": 0.5,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
+    }
+}
+
+
 class Actuator(QGraphicsItem):
     def __init__(self, x, y, size, color, actuator_type, id, predecessor=None, successor=None):
         super().__init__()
@@ -24,6 +50,21 @@ class Actuator(QGraphicsItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
+
+        # Apply configuration
+        config = ACTUATOR_CONFIG.get(self.actuator_type, ACTUATOR_CONFIG["LRA"])
+        self.text_vertical_offset = config["text_vertical_offset"]
+        self.text_horizontal_offset = config["text_horizontal_offset"]
+        self.font_size_factor = config["font_size_factor"]
+        self.min_font_size = config["min_font_size"]
+        self.max_font_size = config["max_font_size"]
+
+    def calculate_font_size(self):
+        base_size = self.size / 2 * self.font_size_factor
+        id_length = len(self.id)
+        if id_length > 3:
+            base_size *= 3 / id_length
+        return max(self.min_font_size, min(base_size, self.max_font_size))
 
     def get_color_name(self, color):
         colors = [
@@ -45,13 +86,28 @@ class Actuator(QGraphicsItem):
     def paint(self, painter, option, widget):
         painter.setBrush(QBrush(self.color))
         painter.setPen(QPen(Qt.GlobalColor.black, 1))
+        
         if self.actuator_type == "LRA":
             painter.drawEllipse(self.boundingRect())
         elif self.actuator_type == "VCA":
             painter.drawRect(self.boundingRect())
         else:  # "M"
             painter.drawRoundedRect(self.boundingRect(), 5, 5)
-        painter.drawText(self.boundingRect(), Qt.AlignmentFlag.AlignCenter, self.id)
+        
+        # Set font size
+        font = painter.font()
+        font.setPointSizeF(self.calculate_font_size())
+        painter.setFont(font)
+        
+        # Calculate text position
+        rect = self.boundingRect()
+        text_rect = QRectF(rect.left() + self.text_horizontal_offset,
+                        rect.top() + self.text_vertical_offset,
+                        rect.width(),
+                        rect.height())
+        
+        # Draw text
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.id)
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -74,6 +130,17 @@ class Actuator(QGraphicsItem):
         super().mouseMoveEvent(event)
         if not self.scene().sceneRect().contains(self.sceneBoundingRect()):
             self.setPos(orig_pos)
+    
+    def adjust_text_position(self, vertical_offset, horizontal_offset):
+        self.text_vertical_offset = vertical_offset
+        self.text_horizontal_offset = horizontal_offset
+        self.update()
+
+    def adjust_font_size(self, factor, min_size, max_size):
+        self.font_size_factor = factor
+        self.min_font_size = min_size
+        self.max_font_size = max_size
+        self.update()
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -152,6 +219,7 @@ class ActuatorCanvas(QGraphicsView):
 
         self.panning = False
         self.last_pan_point = QPointF()
+        self.actuator_size = 20
 
     def update_canvas_visuals(self):
         if self.white_rect_item:
@@ -251,7 +319,7 @@ class ActuatorCanvas(QGraphicsView):
         if predecessor is None or successor is None:
             predecessor, successor = self.get_predecessor_successor(new_id)
 
-        actuator = Actuator(x, y, 20, color, actuator_type, new_id, predecessor, successor)
+        actuator = Actuator(x, y, self.actuator_size, color, actuator_type, new_id, predecessor, successor)
         self.scene.addItem(actuator)
         self.actuators.append(actuator)
 
@@ -311,7 +379,17 @@ class ActuatorCanvas(QGraphicsView):
                     self.branch_colors[new_branch] = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
                 actuator.color = self.branch_colors[new_branch]
             
-            actuator.actuator_type = dialog.get_type()
+            new_type = dialog.get_type()
+            if new_type != actuator.actuator_type:
+                actuator.actuator_type = new_type
+                # Reapply configuration for new type
+                config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
+                actuator.text_vertical_offset = config["text_vertical_offset"]
+                actuator.text_horizontal_offset = config["text_horizontal_offset"]
+                actuator.font_size_factor = config["font_size_factor"]
+                actuator.min_font_size = config["min_font_size"]
+                actuator.max_font_size = config["max_font_size"]
+            
             actuator.predecessor = dialog.predecessor_input.text()
             actuator.successor = dialog.successor_input.text()
             
@@ -350,6 +428,9 @@ class ActuatorCanvas(QGraphicsView):
         # Parse grid pattern
         rows, cols = map(int, grid_pattern.split('x'))
 
+        calculated_size = min(self.canvas_rect.width() / (cols + 1), self.canvas_rect.height() / (rows + 1)) * 0.6
+        self.actuator_size = min(calculated_size, 20)
+
         # Calculate spacing
         spacing_x = self.canvas_rect.width() / (cols + 1)
         spacing_y = self.canvas_rect.height() / (rows + 1)
@@ -372,7 +453,21 @@ class ActuatorCanvas(QGraphicsView):
 
             self.add_actuator(x, y, new_id, actuator_type, predecessor, successor)
 
+        self.actuator_size = 20
+        
+        for actuator in self.actuators:
+            actuator.size = self.actuator_size
+            actuator.update()
+
         self.update()
+    
+    def clear_canvas(self):
+        for actuator in self.actuators:
+            self.scene.removeItem(actuator)
+        self.actuators.clear()
+        self.branch_colors.clear()
+        self.actuator_size = 20  # Reset to default size
+        self.update_canvas_visuals()
 
 class CanvasSizeDialog(QDialog):
     def __init__(self, parent=None):
@@ -459,9 +554,7 @@ class MenuBar(QMenuBar):
         file_menu.addAction(create_branch_action)
 
     def new_workspace(self):
-        self.parent().actuator_canvas.scene.clear()
-        self.parent().actuator_canvas.actuators = []
-        self.parent().actuator_canvas.update_canvas_visuals()
+        self.parent().actuator_canvas.clear_canvas()
 
     def open_file(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Open CSV File", "", "CSV Files (*.csv)")
