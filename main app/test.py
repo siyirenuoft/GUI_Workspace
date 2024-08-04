@@ -12,7 +12,8 @@ import random
 from PyQt6 import QtCore, QtWidgets, QtGui, QtMultimedia
 from PyQt6 import uic
 from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import QMessageBox, QFileDialog
+from PyQt6.QtWidgets import QMessageBox, QFileDialog, QGraphicsWidget, QGraphicsLinearLayout, QPushButton
+
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
@@ -339,29 +340,66 @@ class ActuatorPropertiesDialog(QDialog):
         else:
             return "M"
 
-class SelectionBar(QGraphicsItem):
-    def __init__(self, scene, parent=None):
-        super().__init__()
-        self.setPos(10, 10)  # Default location in the top left corner
-        self.setAcceptHoverEvents(True)
-        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        self.selection_icons = []
-        self.scene = scene
-        self.create_selection_icons()
+class SelectionBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.create_buttons()
 
-    def create_selection_icons(self):
+    def create_buttons(self):
         actuator_types = ["LRA", "VCA", "M"]
-        for i, act_type in enumerate(actuator_types):
-            icon = Actuator(0, 0, 20, QColor(255, 255, 255), act_type, act_type)
-            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-            icon.setPos(0, i * 30)
-            self.selection_icons.append(icon)
-            self.scene.addItem(icon)
+        for act_type in actuator_types:
+            button = DraggableButton(act_type, self)
+            button.setFixedSize(50, 50)
+            button.setStyleSheet("background-color: rgb(240, 235, 229);")
+            font = button.font()
+            font.setPointSize(8)
+            button.setFont(font)
+            self.layout.addWidget(button)
 
-    def paint(self, painter, option, widget):
-        painter.setBrush(QBrush(Qt.GlobalColor.gray))
-        painter.drawRect(self.boundingRect())
+class DraggableButton(QPushButton):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setText(self.text())
+            drag.setMimeData(mime_data)
+            drag.exec(Qt.DropAction.MoveAction)
+
+class SelectionBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.create_buttons()
+
+    def create_buttons(self):
+        actuator_types = ["LRA", "VCA", "M"]
+        for act_type in actuator_types:
+            button = DraggableButton(act_type, self)
+            button.setFixedSize(50, 50)
+            button.setStyleSheet("background-color: rgb(240, 235, 229);")
+            font = button.font()
+            font.setPointSize(8)
+            button.setFont(font)
+            self.layout.addWidget(button)
+
+class DraggableButton(QPushButton):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setText(self.text())
+            drag.setMimeData(mime_data)
+            drag.exec(Qt.DropAction.MoveAction)
+
 
 class ActuatorCanvas(QGraphicsView):
     def __init__(self, parent=None):
@@ -374,7 +412,8 @@ class ActuatorCanvas(QGraphicsView):
         self.branch_colors = {}
         self.color_index = 0  # Index for the color list
 
-        self.setBackgroundBrush(QBrush(Qt.GlobalColor.lightGray))
+        # Set background color to rgb(134, 150, 167)
+        self.setBackgroundBrush(QBrush(QColor(134, 150, 167)))
         self.setSceneRect(-1000, -1000, 2000, 2000)  # Large scene to allow panning
         
         self.canvas_rect = QRectF(0, 0, 400, 300)
@@ -390,20 +429,30 @@ class ActuatorCanvas(QGraphicsView):
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
-        self.selection_bar = SelectionBar(self.scene)
-        self.scene.addItem(self.selection_bar)
+        # Add the selection bar as a fixed widget inside the QGraphicsView
+        self.selection_bar = SelectionBar(self)
+        self.selection_bar.setGeometry(10, 10, 70, 170)  # Adjust the position and size
 
+        # Enable drag and drop
+        self.setAcceptDrops(True)
 
-    def is_drop_allowed(self, pos):
-        return self.canvas_rect.contains(pos)
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
 
+    def dropEvent(self, event):
+        if event.mimeData().hasText():
+            pos = self.mapToScene(event.pos())
+            self.add_actuator(pos.x(), pos.y(), actuator_type=event.mimeData().text())
+            event.acceptProposedAction()
 
     def update_canvas_visuals(self):
         if self.white_rect_item:
             self.scene.removeItem(self.white_rect_item)
         
-        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.white))
-        self.white_rect_item.setZValue(-999)
+        # Set canvas color to a custom RGB value, e.g., (240, 235, 229)
+        self.colored_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
+        self.colored_rect_item.setZValue(-999)
 
         if self.scale_line:
             self.scene.removeItem(self.scale_line)
@@ -414,7 +463,8 @@ class ActuatorCanvas(QGraphicsView):
                                              self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
                                              QPen(Qt.GlobalColor.black, 2))
         self.scale_text = self.scene.addText("100 mm")
-        self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 5)
+        text_rect = self.scale_text.boundingRect()
+        self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
         self.scale_line.setZValue(1000)
         self.scale_text.setZValue(1000)
 
@@ -422,11 +472,12 @@ class ActuatorCanvas(QGraphicsView):
         if self.scale_line and self.scale_text:
             self.scale_line.setLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
                                     self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10)
-            self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 5)
+            text_rect = self.scale_text.boundingRect()
+            self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.pos())
-        if isinstance(item, Actuator) and item in self.selection_bar.selection_icons:
+        if isinstance(item, Actuator):
             self.drag_start_pos = event.pos()
             self.dragging_item = item
             self.dragging_actuator = None  # Reset dragging actuator
@@ -439,7 +490,6 @@ class ActuatorCanvas(QGraphicsView):
             self.show_context_menu(item, event.pos())
         else:
             super().mousePressEvent(event)
-
 
     def mouseMoveEvent(self, event):
         if self.panning:
@@ -458,7 +508,6 @@ class ActuatorCanvas(QGraphicsView):
         else:
             super().mouseMoveEvent(event)
 
-
     def mouseReleaseEvent(self, event):
         if self.panning:
             self.panning = False
@@ -476,12 +525,10 @@ class ActuatorCanvas(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
 
-
     def update_dragging_item(self, event):
         if hasattr(self, 'dragging_actuator') and self.dragging_actuator:
             pos = self.mapToScene(event.pos())
             self.dragging_actuator.setPos(pos.x(), pos.y())
-
 
     def start_dragging_item(self, event):
         item = self.dragging_item
@@ -491,7 +538,6 @@ class ActuatorCanvas(QGraphicsView):
             self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
             self.dragging_actuator = self.actuators[-1]  # Reference to the newly created actuator
             self.drag_start_pos = event.pos()  # Update drag start position
-
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_factor = 1.05  # Reduced from 1.25 to make zooming less sensitive
@@ -513,7 +559,6 @@ class ActuatorCanvas(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
-
 
     def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
         if new_id is None:
@@ -575,7 +620,6 @@ class ActuatorCanvas(QGraphicsView):
             self.edit_actuator_properties(actuator)
         elif action == delete_action:
             self.remove_actuator(actuator)
-
 
     def edit_actuator_properties(self, actuator):
         dialog = ActuatorPropertiesDialog(actuator, self)
@@ -673,7 +717,7 @@ class ActuatorCanvas(QGraphicsView):
             actuator.update()
 
         self.update()
-    
+
     def clear_canvas(self):
         for actuator in self.actuators:
             self.scene.removeItem(actuator)
@@ -682,6 +726,153 @@ class ActuatorCanvas(QGraphicsView):
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
 
+
+
+class ActuatorPropertiesDialog(QDialog):
+    def __init__(self, actuator, parent=None):
+        super().__init__(parent)
+        self.actuator = actuator
+        self.setWindowTitle("Actuator Properties")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.id_input = QLineEdit(actuator.id)
+        form_layout.addRow("ID:", self.id_input)
+
+        type_layout = QHBoxLayout()
+        self.type_group = QButtonGroup(self)
+        self.lra_radio = QRadioButton("LRA")
+        self.vca_radio = QRadioButton("VCA")
+        self.m_radio = QRadioButton("M")
+        self.type_group.addButton(self.lra_radio)
+        self.type_group.addButton(self.vca_radio)
+        self.type_group.addButton(self.m_radio)
+        type_layout.addWidget(self.lra_radio)
+        type_layout.addWidget(self.vca_radio)
+        type_layout.addWidget(self.m_radio)
+        form_layout.addRow("Type:", type_layout)
+
+        self.predecessor_input = QLineEdit(actuator.predecessor or "")
+        self.successor_input = QLineEdit(actuator.successor or "")
+        form_layout.addRow("Predecessor:", self.predecessor_input)
+        form_layout.addRow("Successor:", self.successor_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
+
+        self.set_initial_type()
+
+    def set_initial_type(self):
+        if self.actuator.actuator_type == "LRA":
+            self.lra_radio.setChecked(True)
+        elif self.actuator.actuator_type == "VCA":
+            self.vca_radio.setChecked(True)
+        else:
+            self.m_radio.setChecked(True)
+
+    def get_type(self):
+        if self.lra_radio.isChecked():
+            return "LRA"
+        elif self.vca_radio.isChecked():
+            return "VCA"
+        else:
+            return "M"
+
+class CreateBranchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Actuator Branch")
+        layout = QVBoxLayout(self)
+
+        self.num_actuators_input = QSpinBox()
+        self.num_actuators_input.setMinimum(1)
+        self.num_actuators_input.valueChanged.connect(self.update_max_counts)
+        layout.addWidget(QLabel("Number of Actuators:"))
+        layout.addWidget(self.num_actuators_input)
+
+        self.lra_input = QSpinBox()
+        self.lra_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("LRA Count:"))
+        layout.addWidget(self.lra_input)
+
+        self.vca_input = QSpinBox()
+        self.vca_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("VCA Count:"))
+        layout.addWidget(self.vca_input)
+
+        self.m_input = QSpinBox()
+        self.m_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("M Count:"))
+        layout.addWidget(self.m_input)
+
+        self.grid_pattern_input = QLineEdit()
+        self.grid_pattern_input.textChanged.connect(self.validate_inputs)
+        layout.addWidget(QLabel("Grid Pattern (e.g., 2x2, 3x3):"))
+        layout.addWidget(self.grid_pattern_input)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.num_actuators_input.setValue(1)
+        self.update_max_counts()
+        self.validate_inputs()
+
+    def update_max_counts(self):
+        total = self.num_actuators_input.value()
+        self.lra_input.setMaximum(total)
+        self.vca_input.setMaximum(total)
+        self.m_input.setMaximum(total)
+        self.check_total()
+        self.validate_inputs()
+
+    def check_total(self):
+        total = self.num_actuators_input.value()
+        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+        
+        if sum_counts > total:
+            diff = sum_counts - total
+            if self.sender() == self.lra_input:
+                self.lra_input.setValue(max(0, self.lra_input.value() - diff))
+            elif self.sender() == self.vca_input:
+                self.vca_input.setValue(max(0, self.vca_input.value() - diff))
+            elif self.sender() == self.m_input:
+                self.m_input.setValue(max(0, self.m_input.value() - diff))
+            
+            # Recalculate sum_counts after adjustment
+            sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+
+        self.validate_inputs()
+
+    def accept(self):
+        if (self.lra_input.value() + self.vca_input.value() + self.m_input.value() == self.num_actuators_input.value() and
+            self.validate_grid_pattern(self.grid_pattern_input.text())):
+            super().accept()
+
+    def validate_grid_pattern(self, pattern):
+        if not pattern.strip():  # Allow empty pattern
+            return True
+        try:
+            rows, cols = map(int, pattern.split('x'))
+            return rows > 0 and cols > 0  # Just check if it's a valid grid format
+        except ValueError:
+            return False
+        
+    def validate_inputs(self):
+        total = self.num_actuators_input.value()
+        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+        grid_pattern = self.grid_pattern_input.text().strip()
+        
+        counts_valid = sum_counts == total
+        grid_valid = self.validate_grid_pattern(grid_pattern)
+        
+        is_valid = counts_valid and grid_valid
+        
+        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -726,6 +917,19 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.pushButton_2.clicked.connect(self.save_current_signal)
 
         self.signal_counter = 1  # Counter for naming saved signals
+        self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
+
+    def create_actuator_branch(self):
+        dialog = CreateBranchDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            num_actuators = dialog.num_actuators_input.value()
+            lra_count = dialog.lra_input.value()
+            vca_count = dialog.vca_input.value()
+            m_count = dialog.m_input.value()
+            grid_pattern = dialog.grid_pattern_input.text()
+
+            self.actuator_canvas.create_actuator_branch(
+                num_actuators, lra_count, vca_count, m_count, grid_pattern)
 
     def setup_tree_widget(self):
         tree = self.ui.treeWidget
@@ -734,9 +938,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             QTreeWidget {
                 background-color: rgb(134, 150, 167);
                 color: rgb(240, 235, 229);
-            }
-            QTreeWidget::item {
-                background-color: transparent;
             }
             QToolTip {
                 color: rgb(134, 150, 167);  /* Text color */
@@ -791,7 +992,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         tree.customContextMenuRequested.connect(self.on_custom_context_menu)
 
-
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_clicked(self, item, column):
         signal_type = item.text(column)
@@ -835,7 +1035,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         elif signal_type == "Exponential Decay":
             return np.exp(-5 * t)
         elif signal_type == "PolyBezier":
-            return t**3 - 3 * t**2 + 3 * t
+            return t**3 - 3 * t
         elif signal_type == "Signal Envelope":
             return np.abs(np.sin(2 * np.pi * 3 * t))
         elif signal_type in self.custom_signals:  # Check if it's a custom signal
@@ -903,7 +1103,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         if index != -1:
             self.customizes.takeChild(index)
 
-
 class Worker(QtCore.QRunnable):
     def __init__(self, function, *args, **kwargs):
         super().__init__()
@@ -914,7 +1113,6 @@ class Worker(QtCore.QRunnable):
     @pyqtSlot()
     def run(self):
         self.function(*self.args, **self.kwargs)
-
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
