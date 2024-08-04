@@ -1,0 +1,304 @@
+
+class ActuatorCanvas(QGraphicsView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.scene = QGraphicsScene(self)
+        self.setScene(self.scene)
+        self.setRenderHints(QPainter.RenderHint.Antialiasing)
+
+        self.actuators = []
+        self.branch_colors = {}
+        self.color_index = 0  # Index for the color list
+
+        self.setBackgroundBrush(QBrush(Qt.GlobalColor.lightGray))
+        self.setSceneRect(-1000, -1000, 2000, 2000)  # Large scene to allow panning
+        
+        self.canvas_rect = QRectF(0, 0, 400, 300)
+        self.white_rect_item = None
+        self.scale_line = None
+        self.scale_text = None
+        self.update_canvas_visuals()
+
+        self.setMouseTracking(True)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+
+        self.panning = False
+        self.last_pan_point = QPointF()
+        self.actuator_size = 20
+
+        self.selection_bar = SelectionBar(self.scene)
+        self.scene.addItem(self.selection_bar)
+
+    def update_canvas_visuals(self):
+        if self.white_rect_item:
+            self.scene.removeItem(self.white_rect_item)
+        
+        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.white))
+        self.white_rect_item.setZValue(-999)
+
+        if self.scale_line:
+            self.scene.removeItem(self.scale_line)
+        if self.scale_text:
+            self.scene.removeItem(self.scale_text)
+
+        self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
+                                             self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
+                                             QPen(Qt.GlobalColor.black, 2))
+        self.scale_text = self.scene.addText("100 mm")
+        self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 5)
+        self.scale_line.setZValue(1000)
+        self.scale_text.setZValue(1000)
+
+    def update_scale_position(self):
+        if self.scale_line and self.scale_text:
+            self.scale_line.setLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
+                                    self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10)
+            self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 5)
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if isinstance(item, Actuator) and item in self.selection_bar.selection_icons:
+            self.drag_start_pos = event.pos()
+            self.dragging_item = item
+        elif event.button() == Qt.MouseButton.MiddleButton:
+            self.panning = True
+            self.last_pan_point = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.panning:
+            delta = event.pos() - self.last_pan_point
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.last_pan_point = event.pos()
+            event.accept()
+        elif hasattr(self, 'dragging_item') and self.dragging_item:
+            if not hasattr(self, 'dragging_actuator'):
+                if (event.pos() - self.drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
+                    self.start_dragging_item(event)
+            else:
+                self.update_dragging_item(event)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+
+    def mouseReleaseEvent(self, event):
+        if self.panning:
+            self.panning = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+        elif hasattr(self, 'dragging_item') and self.dragging_item:
+            if hasattr(self, 'dragging_actuator') and self.dragging_actuator:
+                self.dragging_actuator = None
+            self.dragging_item = None
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def update_dragging_item(self, event):
+        if hasattr(self, 'dragging_actuator') and self.dragging_actuator:
+            pos = self.mapToScene(event.pos())
+            self.dragging_actuator.setPos(pos.x(), pos.y())
+
+
+    def start_dragging_item(self, event):
+        item = self.dragging_item
+        if item:
+            actuator_type = item.actuator_type
+            pos = self.mapToScene(event.pos())
+            self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
+            self.dragging_actuator = self.actuators[-1]  # Reference to the newly created actuator
+            self.drag_start_pos = event.pos()  # Update drag start position
+
+
+    def wheelEvent(self, event: QWheelEvent):
+        zoom_factor = 1.05  # Reduced from 1.25 to make zooming less sensitive
+
+        old_pos = self.mapToScene(event.position().toPoint())
+
+        if event.angleDelta().y() > 0:
+            self.scale(zoom_factor, zoom_factor)
+        else:
+            self.scale(1 / zoom_factor, 1 / zoom_factor)
+
+        new_pos = self.mapToScene(event.position().toPoint())
+
+        delta = new_pos - old_pos
+        self.translate(delta.x(), delta.y())
+
+        self.update_scale_position()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+
+    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
+        if new_id is None:
+            new_id = self.generate_next_id()
+        
+        branch = new_id.split('.')[0]
+        if branch not in self.branch_colors:
+            if self.color_index < len(COLOR_LIST):
+                self.branch_colors[branch] = COLOR_LIST[self.color_index]
+                self.color_index += 1
+            else:
+                self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
+        color = self.branch_colors[branch]
+
+        if predecessor is None or successor is None:
+            predecessor, successor = self.get_predecessor_successor(new_id)
+
+        actuator = Actuator(x, y, self.actuator_size, color, actuator_type, new_id, predecessor, successor)
+        self.scene.addItem(actuator)
+        self.actuators.append(actuator)
+
+        # Update the predecessor's successor
+        if predecessor:
+            for act in self.actuators:
+                if act.id == predecessor:
+                    act.successor = new_id
+                    break
+
+    def generate_next_id(self):
+        if not self.actuators:
+            return "A.1"
+        
+        max_branch = max(act.id.split('.')[0] for act in self.actuators if '.' in act.id)
+        max_number = max(int(act.id.split('.')[1]) for act in self.actuators if '.' in act.id and act.id.startswith(max_branch))
+        
+        return f"{max_branch}.{max_number + 1}"
+
+    def get_predecessor_successor(self, new_id):
+        branch, number = new_id.split('.')
+        number = int(number)
+        
+        predecessor = None
+        for act in reversed(self.actuators):
+            if '.' in act.id:
+                act_branch, act_number = act.id.split('.')
+                if act_branch == branch and int(act_number) == number - 1:
+                    predecessor = act.id
+                    break
+        
+        return predecessor, None
+
+    def show_context_menu(self, actuator, pos):
+        menu = QMenu()
+        edit_action = menu.addAction("Edit Properties")
+        delete_action = menu.addAction("Delete")
+
+        action = menu.exec(self.mapToGlobal(pos))
+        if action == edit_action:
+            self.edit_actuator_properties(actuator)
+        elif action == delete_action:
+            self.remove_actuator(actuator)
+
+    def edit_actuator_properties(self, actuator):
+        dialog = ActuatorPropertiesDialog(actuator, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            old_id = actuator.id
+            new_id = dialog.id_input.text()
+            actuator.id = new_id
+            
+            # Update color if branch has changed
+            old_branch = old_id.split('.')[0]
+            new_branch = new_id.split('.')[0]
+            if old_branch != new_branch:
+                if new_branch not in self.branch_colors:
+                    self.branch_colors[new_branch] = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+                actuator.color = self.branch_colors[new_branch]
+            
+            new_type = dialog.get_type()
+            if new_type != actuator.actuator_type:
+                actuator.actuator_type = new_type
+                # Reapply configuration for new type
+                config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
+                actuator.text_vertical_offset = config["text_vertical_offset"]
+                actuator.text_horizontal_offset = config["text_horizontal_offset"]
+                actuator.font_size_factor = config["font_size_factor"]
+                actuator.min_font_size = config["min_font_size"]
+                actuator.max_font_size = config["max_font_size"]
+            
+            actuator.predecessor = dialog.predecessor_input.text()
+            actuator.successor = dialog.successor_input.text()
+            
+            actuator.size = self.actuator_size  # Use the canvas's actuator size
+            
+            actuator.update()
+            
+            # Update other actuators if necessary
+            self.update_related_actuators(old_id, new_id)
+
+    def update_related_actuators(self, old_id, new_id):
+        for act in self.actuators:
+            if act.predecessor == old_id:
+                act.predecessor = new_id
+            if act.successor == old_id:
+                act.successor = new_id
+            act.update()
+
+    def remove_actuator(self, actuator):
+        self.scene.removeItem(actuator)
+        self.actuators.remove(actuator)
+
+    def set_canvas_size(self, width, height):
+        self.canvas_rect = QRectF(0, 0, width, height)
+        self.update_canvas_visuals()
+        self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def create_actuator_branch(self, num_actuators, lra_count, vca_count, m_count, grid_pattern):
+        # Get the next branch letter
+        if not self.actuators:
+            next_branch = 'A'
+        else:
+            max_branch = max(act.id.split('.')[0] for act in self.actuators if '.' in act.id)
+            next_branch = chr(ord(max_branch) + 1)
+
+        # Parse grid pattern
+        rows, cols = map(int, grid_pattern.split('x'))
+
+        calculated_size = min(self.canvas_rect.width() / (cols + 1), self.canvas_rect.height() / (rows + 1)) * 0.6
+        self.actuator_size = min(calculated_size, 20)
+
+        # Calculate spacing
+        spacing_x = self.canvas_rect.width() / (cols + 1)
+        spacing_y = self.canvas_rect.height() / (rows + 1)
+
+        # Create actuators
+        actuator_types = ['LRA'] * lra_count + ['VCA'] * vca_count + ['M'] * m_count
+        random.shuffle(actuator_types)
+
+        for i in range(num_actuators):
+            row = i // cols
+            col = i % cols
+            x = spacing_x * (col + 1)
+            y = spacing_y * (row + 1)
+
+            new_id = f"{next_branch}.{i+1}"
+            actuator_type = actuator_types[i] if i < len(actuator_types) else 'LRA'
+
+            predecessor = f"{next_branch}.{i}" if i > 0 else None
+            successor = f"{next_branch}.{i+2}" if i < num_actuators - 1 else None
+
+            self.add_actuator(x, y, new_id, actuator_type, predecessor, successor)
+
+        self.actuator_size = 20
+        
+        for actuator in self.actuators:
+            actuator.size = self.actuator_size
+            actuator.update()
+
+        self.update()
+    
+    def clear_canvas(self):
+        for actuator in self.actuators:
+            self.scene.removeItem(actuator)
+        self.actuators.clear()
+        self.branch_colors.clear()
+        self.actuator_size = 20  # Reset to default size
+        self.update_canvas_visuals()

@@ -548,7 +548,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Add ActuatorCanvas to the layout with a fixed height
         self.actuator_canvas = ActuatorCanvas(self.ui.widget_2)
-        self.actuator_canvas.setFixedHeight(400)  # Set the fixed height here
+        self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
         self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)   
 
         # Connect clear button to clear_plot method
