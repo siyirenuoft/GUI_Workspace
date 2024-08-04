@@ -20,26 +20,30 @@ from datetime import date, datetime
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 
+
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
         self.current_signal = None  # Track the current signal
         bg_color = (134/255, 150/255, 167/255)
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=bg_color)
-        self.axes = self.fig.add_axes([0.1, 0.1, 0.8, 0.8])  # Use add_axes to create a single plot
+        self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(bg_color)
-        self.axes.set_xticks([])  # Hide x-axis ticks
-        self.axes.set_yticks([])  # Hide y-axis ticks
 
         # Convert RGB to rgba using matplotlib.colors.to_rgba
         spine_color = to_rgba((240/255, 235/255, 229/255))
 
-        self.axes.tick_params(axis='x', colors=spine_color)
-        self.axes.tick_params(axis='y', colors=spine_color)
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.spines['bottom'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
         self.axes.spines['right'].set_color(spine_color)
         self.axes.spines['left'].set_color(spine_color)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
+
+        # Move x-axis label to the right side
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
+
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
         self.setStyleSheet("background-color: rgb(134, 150, 167); color: spine_color;")
@@ -48,6 +52,14 @@ class MplCanvas(FigureCanvas):
         # Enable drag and drop
         self.setAcceptDrops(True)
 
+        # Draw initial empty plot
+        self.plot([], [])
+
+    def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
+        self.axes.set_xlabel('')  # Remove default xlabel
+        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize,
+                           color=color, ha='left', va='center')
+
     def plot(self, x, y):
         self.axes.clear()
         bg_color = (134/255, 150/255, 167/255)
@@ -55,10 +67,13 @@ class MplCanvas(FigureCanvas):
         spine_color = to_rgba((240/255, 235/255, 229/255))
         self.axes.set_facecolor(bg_color)
         self.axes.plot(x, y, color=spine_color)
-        self.axes.set_xticks([])  # Hide x-axis ticks
-        self.axes.set_yticks([])  # Hide y-axis ticks
-        self.axes.tick_params(axis='x', colors=spine_color)
-        self.axes.tick_params(axis='y', colors=spine_color)
+        
+        # Set x and y labels
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
+        
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.spines['bottom'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
         self.axes.spines['right'].set_color(spine_color)
@@ -78,10 +93,7 @@ class MplCanvas(FigureCanvas):
 
     def clear_plot(self):
         self.current_signal = None
-        self.axes.clear()
-        self.axes.set_xticks([])  # Hide x-axis ticks
-        self.axes.set_yticks([])  # Hide y-axis ticks
-        self.draw()
+        self.plot([], [])
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
@@ -93,7 +105,6 @@ class MplCanvas(FigureCanvas):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
         self.app_reference.add_signal(signal_type, combine=True)  # Use app_reference with combine=True
-
 
 # Define the ACTUATOR_CONFIG dictionary
 ACTUATOR_CONFIG = {
@@ -503,11 +514,12 @@ class ActuatorCanvas(QGraphicsView):
         self.update_canvas_visuals()
         self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.ui = uic.loadUi('layout.ui', self)
-        self.resize(1500, 600)
+        self.resize(1500, 750)
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
 
@@ -549,27 +561,45 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     def setup_tree_widget(self):
         tree = self.ui.treeWidget
-        tree.setHeaderHidden(True)        
-        tree.setStyleSheet("background-color: rgb(134, 150, 167); color: rgb(240, 235, 229);")
+        tree.setHeaderHidden(True)
+        tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: rgb(134, 150, 167);
+                color: rgb(240, 235, 229);
+            }
+            QTreeWidget::item {
+                background-color: transparent;
+            }
+            QToolTip {
+                color: rgb(134, 150, 167);  /* Text color */
+                background-color: rgba(0, 0, 0, 128);  /* Black background with transparency */
+                font-weight: bold;  /* Bold text */
+            }
+        """)
         tree.setDragEnabled(True)
         tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         tree.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        tree.setToolTipDuration(2000)  # Set tooltip duration to 2 seconds
 
         # Create top-level items
         oscillators = QTreeWidgetItem(tree)
         oscillators.setText(0, "Oscillators")
+        oscillators.setToolTip(0, "Oscillators")  # Set tooltip
 
         envelopes = QTreeWidgetItem(tree)
         envelopes.setText(0, "Envelopes")
+        envelopes.setToolTip(0, "Envelopes")  # Set tooltip
 
         self.customizes = QTreeWidgetItem(tree)
         self.customizes.setText(0, "Customized Signals")
+        self.customizes.setToolTip(0, "Customized Signals")  # Set tooltip
 
         # Add child items to "Oscillators"
         osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
         for item in osc_items:
             child = QTreeWidgetItem(oscillators)
             child.setText(0, item)
+            child.setToolTip(0, item)  # Set tooltip
             self.signal_templates[item] = self.generate_signal(item)
 
         # Add child items to "Envelopes"
@@ -577,6 +607,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         for item in env_items:
             child = QTreeWidgetItem(envelopes)
             child.setText(0, item)
+            child.setToolTip(0, item)  # Set tooltip
             self.signal_templates[item] = self.generate_signal(item)
 
         # Expand all items by default
@@ -591,6 +622,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Enable context menu
         tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         tree.customContextMenuRequested.connect(self.on_custom_context_menu)
+
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_clicked(self, item, column):
@@ -665,6 +697,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.signal_counter += 1
                 child = QTreeWidgetItem(self.customizes)
                 child.setText(0, signal_name)
+                child.setToolTip(0, signal_name)  # Set tooltip
                 child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
                 child.setData(0, QtCore.Qt.ItemDataRole.UserRole, signal_name)  # Store the original name
                 self.customizes.addChild(child)
@@ -677,6 +710,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         if old_name and old_name in self.custom_signals:
             self.custom_signals[new_name] = self.custom_signals.pop(old_name)
             item.setData(column, QtCore.Qt.ItemDataRole.UserRole, new_name)
+            item.setToolTip(0, new_name)  # Update tooltip
 
     @pyqtSlot(QtCore.QPoint)
     def on_custom_context_menu(self, point):
