@@ -366,12 +366,13 @@ class ActuatorPropertiesDialog(QDialog):
 class SelectionBar(QGraphicsItem):
     def __init__(self, scene, parent=None):
         super().__init__()
-        self.setPos(10, 10)  # Default location in the top left corner
+        self.setPos(0, 70)  # Default location in the top left corner
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
         self.selection_icons = []
         self.scene = scene
         self.create_selection_icons()
+
 
     def create_selection_icons(self):
         actuator_types = ["LRA", "VCA", "M"]
@@ -379,11 +380,10 @@ class SelectionBar(QGraphicsItem):
             icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
             icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-            icon.setPos(i*30 ,0)
-            icon.setPos(-100, i * 30)
+            icon.setParentItem(self)  # Set the parent to SelectionBar
+            icon.setPos(-30, i * 40)  # Adjust X and Y position of each icon
             icon.adjust_font_size(0.3, 6, 12)  # Adjust font size here
             self.selection_icons.append(icon)
-            self.scene.addItem(icon)
 
 
 class ActuatorCanvas(QGraphicsView):
