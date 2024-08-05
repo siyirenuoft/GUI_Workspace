@@ -410,27 +410,12 @@ class ActuatorCanvas(QGraphicsView):
         self.setMouseTracking(True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
-        self.setAcceptDrops(True)  # Allow drop events
-
         self.panning = False
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dropEvent(self, event):
-        if event.mimeData().hasText():
-            actuator_type = event.mimeData().text()
-            pos = self.mapToScene(event.position().toPoint())
-            self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
-            event.acceptProposedAction()
-    
+        self.selection_bar = SelectionBar(self.scene)
+        self.scene.addItem(self.selection_bar)
 
     def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
         if new_id is None:
@@ -461,9 +446,6 @@ class ActuatorCanvas(QGraphicsView):
                 if act.id == predecessor:
                     act.successor = new_id
                     break
-
-
-
 
     def is_drop_allowed(self, pos):
         return self.canvas_rect.contains(pos)
@@ -732,27 +714,7 @@ class ActuatorCanvas(QGraphicsView):
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
 
-class SelectionBarView(QGraphicsView):
-    def __init__(self, scene, parent=None):
-        super().__init__(parent)
-        self.setScene(scene)
-        self.setRenderHints(QPainter.RenderHint.Antialiasing)
-        self.setFixedSize(100, 100)  # Adjust size as needed
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setStyleSheet("background: transparent; border: none;")
-        self.setMouseTracking(True)
 
-    def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        if isinstance(item, Actuator):
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setText(item.actuator_type)
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.DropAction.CopyAction)
-        super().mousePressEvent(event)
-        
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
         super().__init__(parent)
@@ -936,16 +898,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.actuator_canvas = ActuatorCanvas(self.ui.widget_2)
         self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
         self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
-
-        # Create a scene for the selection bar
-        self.selection_scene = QGraphicsScene()
-
-        # Create the selection bar view and add it to the layout
-        self.selection_bar = SelectionBar(self.selection_scene)
-        self.selection_view = SelectionBarView(self.selection_scene, self.ui.widget_2)
-        self.selection_view.setFixedSize(100, 100)  # Set size and position as needed
-        self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
-
 
         # Connect clear button to clear_plot method
         self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
