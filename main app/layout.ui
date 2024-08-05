@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1268</width>
+    <width>1175</width>
     <height>742</height>
    </rect>
   </property>
@@ -99,6 +99,11 @@
                    <widget class="QPushButton" name="pushButton_2">
                     <property name="text">
                      <string>Save Signal</string>
+                    </property>
+                   </widget>
+                   <widget class="QPushButton" name="pushButton_7">
+                    <property name="text">
+                     <string>Apply</string>
                     </property>
                    </widget>
                   </widget>
@@ -360,10 +365,23 @@
               </spacer>
              </item>
              <item row="0" column="0">
-              <widget class="QWidget" name="widget_3" native="true">
+              <widget class="QScrollArea" name="scrollArea">
                <property name="styleSheet">
-                <string notr="true">background-color: rgb(170, 170, 255);</string>
+                <string notr="true">background-color: rgb(134,150,167);</string>
                </property>
+               <property name="widgetResizable">
+                <bool>true</bool>
+               </property>
+               <widget class="QWidget" name="scrollAreaWidgetContents">
+                <property name="geometry">
+                 <rect>
+                  <x>0</x>
+                  <y>0</y>
+                  <width>1119</width>
+                  <height>175</height>
+                 </rect>
+                </property>
+               </widget>
               </widget>
              </item>
             </layout>
@@ -382,7 +400,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1268</width>
+     <width>1175</width>
      <height>22</height>
     </rect>
    </property>

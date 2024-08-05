@@ -1,41 +1,32 @@
-import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem
+import matplotlib.pyplot as plt
 
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        
-        self.setWindowTitle("QTreeWidget")
-        self.setGeometry(100, 100, 300, 400)
-        
-        tree = QTreeWidget(self)
-        tree.setHeaderHidden(True)
-        tree.setGeometry(10, 10, 280, 380)
-        
-        # Create top-level items
-        oscillators = QTreeWidgetItem(tree)
-        oscillators.setText(0, "Oscillators")
-        
-        envelopes = QTreeWidgetItem(tree)
-        envelopes.setText(0, "Envelopes")
-        
-        # Add child items to "Oscillators"
-        osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
-        for item in osc_items:
-            child = QTreeWidgetItem(oscillators)
-            child.setText(0, item)
-        
-        # Add child items to "Envelopes"
-        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]
-        for item in env_items:
-            child = QTreeWidgetItem(envelopes)
-            child.setText(0, item)
-        
-        # Expand all items by default
-        tree.expandAll()
+# Morandi color list in RGB
+COLOR_LIST = [
+    (194, 166, 159),  # Pale Taupe
+    (171, 205, 239),  # Light Blue
+    (194, 178, 128),  # Khaki
+    (242, 215, 213),  # Misty Rose
+    (204, 204, 255),  # Lavender
+    (200, 202, 167),  # Pale Goldenrod
+    (180, 144, 125),  # Tan
+    (150, 143, 132),  # Dark Gray
+    (206, 179, 139),  # Burly Wood
+    (160, 159, 153),  # Light Slate Gray
+    (158, 175, 163),  # Dark Sea Green
+    (175, 167, 191),  # Thistle
+    (224, 224, 224),  # Gainsboro
+    (192, 192, 192),  # Silver
+    (230, 159, 125),  # Peach
+    (255, 182, 193),  # Light Pink
+    (139, 121, 94),   # Umber
+    (169, 196, 176),  # Dark Moss Green
+    (144, 175, 197),  # Cadet Blue
+    (188, 170, 164)   # Rosy Brown
+]
+# Plotting the colors
+plt.figure(figsize=(10, 2))
+plt.imshow([COLOR_LIST], aspect='auto')
+plt.axis('off')
+plt.title('Morandi Color Palette')
+plt.show()
 
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())

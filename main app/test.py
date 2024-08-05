@@ -12,15 +12,19 @@ import random
 from PyQt6 import QtCore, QtWidgets, QtGui, QtMultimedia
 from PyQt6 import uic
 from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import QMessageBox, QFileDialog, QGraphicsWidget, QGraphicsLinearLayout, QPushButton
-
+from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 from datetime import date, datetime
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
+import json
 
+from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
+from PyQt6.QtCore import Qt, pyqtSlot, QPoint
+from PyQt6.QtGui import QPen, QColor, QBrush, QFont
+from PyQt6.QtCore import pyqtSignal
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
@@ -67,7 +71,11 @@ class MplCanvas(FigureCanvas):
         # Convert RGB to rgba using matplotlib.colors.to_rgba
         spine_color = to_rgba((240/255, 235/255, 229/255))
         self.axes.set_facecolor(bg_color)
-        self.axes.plot(x, y, color=spine_color)
+        
+        if len(x) == len(y):
+            self.axes.plot(x, y, color=spine_color)
+        else:
+            print(f"Error: x and y must have the same length, but have shapes {x.shape} and {y.shape}")
         
         # Set x and y labels
         self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
@@ -81,6 +89,7 @@ class MplCanvas(FigureCanvas):
         self.axes.spines['left'].set_color(spine_color)
         self.draw()
 
+
     def add_signal(self, new_signal, combine=False):
         if combine and self.current_signal is not None:
             # Ensure both signals are of the same data type before adding
@@ -91,6 +100,7 @@ class MplCanvas(FigureCanvas):
             self.current_signal = new_signal
         t = np.linspace(0, 1, len(self.current_signal))
         self.plot(t, self.current_signal)
+
 
     def clear_plot(self):
         self.current_signal = None
@@ -106,6 +116,7 @@ class MplCanvas(FigureCanvas):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
         self.app_reference.add_signal(signal_type, combine=True)  # Use app_reference with combine=True
+
 
 # Define the ACTUATOR_CONFIG dictionary
 ACTUATOR_CONFIG = {
@@ -134,26 +145,26 @@ ACTUATOR_CONFIG = {
 
 # Predefined color list for actuators (20 colors)
 COLOR_LIST = [
-    QColor(255, 0, 0),  # Red
-    QColor(0, 255, 0),  # Green
-    QColor(0, 0, 255),  # Blue
-    QColor(255, 255, 0),  # Yellow
-    QColor(255, 0, 255),  # Magenta
-    QColor(0, 255, 255),  # Cyan
-    QColor(128, 0, 0),  # Maroon
-    QColor(128, 128, 0),  # Olive
-    QColor(0, 128, 0),  # Dark Green
-    QColor(128, 0, 128),  # Purple
-    QColor(0, 128, 128),  # Teal
-    QColor(0, 0, 128),  # Navy
+    QColor(194, 166, 159),  # Pale Taupe
+    QColor(171, 205, 239),  # Light Blue
+    QColor(194, 178, 128),  # Khaki
+    QColor(242, 215, 213),  # Misty Rose
+    QColor(204, 204, 255),  # Lavender
+    QColor(200, 202, 167),  # Pale Goldenrod
+    QColor(180, 144, 125),  # Tan
+    QColor(150, 143, 132),  # Dark Gray
+    QColor(206, 179, 139),  # Burly Wood
+    QColor(160, 159, 153),  # Light Slate Gray
+    QColor(158, 175, 163),  # Dark Sea Green
+    QColor(175, 167, 191),  # Thistle
+    QColor(224, 224, 224),  # Gainsboro
     QColor(192, 192, 192),  # Silver
-    QColor(128, 128, 128),  # Gray
-    QColor(255, 165, 0),  # Orange
-    QColor(255, 20, 147),  # Deep Pink
-    QColor(75, 0, 130),  # Indigo
-    QColor(173, 255, 47),  # Green Yellow
-    QColor(0, 255, 127),  # Spring Green
-    QColor(70, 130, 180)  # Steel Blue
+    QColor(230, 159, 125),  # Peach
+    QColor(255, 182, 193),  # Light Pink
+    QColor(139, 121, 94),   # Umber
+    QColor(169, 196, 176),  # Dark Moss Green
+    QColor(144, 175, 197),  # Cadet Blue
+    QColor(188, 170, 164)   # Rosy Brown
 ]
 
 # Function to generate a contrasting color
@@ -165,7 +176,10 @@ def generate_contrasting_color(existing_colors):
             return new_color
 
 
+
 class Actuator(QGraphicsItem):
+    properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
+
     def __init__(self, x, y, size, color, actuator_type, id, predecessor=None, successor=None):
         super().__init__()
         self.setPos(x, y)
@@ -230,9 +244,9 @@ class Actuator(QGraphicsItem):
         # Calculate text position
         rect = self.boundingRect()
         text_rect = QRectF(rect.left() + self.text_horizontal_offset,
-                        rect.top() + self.text_vertical_offset,
-                        rect.width(),
-                        rect.height())
+                           rect.top() + self.text_vertical_offset,
+                           rect.width(),
+                           rect.height())
         
         # Draw text
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.id)
@@ -286,6 +300,12 @@ class Actuator(QGraphicsItem):
         self.min_font_size = min_size
         self.max_font_size = max_size
         self.update()
+    
+    def update_properties(self, actuator_type, color):
+        self.actuator_type = actuator_type
+        self.color = color
+        self.update()
+        self.properties_changed.emit(self.id, self.actuator_type, self.color.name())
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -340,68 +360,33 @@ class ActuatorPropertiesDialog(QDialog):
         else:
             return "M"
 
-class SelectionBar(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.create_buttons()
+class SelectionBar(QGraphicsItem):
+    def __init__(self, scene, parent=None):
+        super().__init__()
+        self.setPos(0, 70)  # Default location in the top left corner
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.selection_icons = []
+        self.scene = scene
+        self.create_selection_icons()
 
-    def create_buttons(self):
+
+    def create_selection_icons(self):
         actuator_types = ["LRA", "VCA", "M"]
-        for act_type in actuator_types:
-            button = DraggableButton(act_type, self)
-            button.setFixedSize(50, 50)
-            button.setStyleSheet("background-color: rgb(240, 235, 229);")
-            font = button.font()
-            font.setPointSize(8)
-            button.setFont(font)
-            self.layout.addWidget(button)
-
-class DraggableButton(QPushButton):
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self.setAcceptDrops(True)
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setText(self.text())
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.DropAction.MoveAction)
-
-class SelectionBar(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.create_buttons()
-
-    def create_buttons(self):
-        actuator_types = ["LRA", "VCA", "M"]
-        for act_type in actuator_types:
-            button = DraggableButton(act_type, self)
-            button.setFixedSize(50, 50)
-            button.setStyleSheet("background-color: rgb(240, 235, 229);")
-            font = button.font()
-            font.setPointSize(8)
-            button.setFont(font)
-            self.layout.addWidget(button)
-
-class DraggableButton(QPushButton):
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self.setAcceptDrops(True)
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setText(self.text())
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.DropAction.MoveAction)
+        for i, act_type in enumerate(actuator_types):
+            icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
+            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+            icon.setParentItem(self)  # Set the parent to SelectionBar
+            icon.setPos(-30, i * 40)  # Adjust X and Y position of each icon
+            icon.adjust_font_size(0.3, 6, 12)  # Adjust font size here
+            self.selection_icons.append(icon)
 
 
 class ActuatorCanvas(QGraphicsView):
+    actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
+    properties_changed = pyqtSignal(str, str, str, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene(self)
@@ -429,22 +414,42 @@ class ActuatorCanvas(QGraphicsView):
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
-        # Add the selection bar as a fixed widget inside the QGraphicsView
-        self.selection_bar = SelectionBar(self)
-        self.selection_bar.setGeometry(10, 10, 70, 170)  # Adjust the position and size
+        self.selection_bar = SelectionBar(self.scene)
+        self.scene.addItem(self.selection_bar)
 
-        # Enable drag and drop
-        self.setAcceptDrops(True)
+    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
+        if new_id is None:
+            new_id = self.generate_next_id()
+        
+        branch = new_id.split('.')[0]
+        if branch not in self.branch_colors:
+            if self.color_index < len(COLOR_LIST):
+                self.branch_colors[branch] = COLOR_LIST[self.color_index]
+                self.color_index += 1
+            else:
+                self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
+        color = self.branch_colors[branch]
 
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
+        if predecessor is None or successor is None:
+            predecessor, successor = self.get_predecessor_successor(new_id)
 
-    def dropEvent(self, event):
-        if event.mimeData().hasText():
-            pos = self.mapToScene(event.pos())
-            self.add_actuator(pos.x(), pos.y(), actuator_type=event.mimeData().text())
-            event.acceptProposedAction()
+        actuator = Actuator(x, y, self.actuator_size, color, actuator_type, new_id, predecessor, successor)
+        self.scene.addItem(actuator)
+        self.actuators.append(actuator)
+
+        # Emit signal when an actuator is added
+        self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
+
+        # Update the predecessor's successor
+        if predecessor:
+            for act in self.actuators:
+                if act.id == predecessor:
+                    act.successor = new_id
+                    break
+
+    def is_drop_allowed(self, pos):
+        return self.canvas_rect.contains(pos)
+
 
     def update_canvas_visuals(self):
         if self.white_rect_item:
@@ -477,7 +482,7 @@ class ActuatorCanvas(QGraphicsView):
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.pos())
-        if isinstance(item, Actuator):
+        if isinstance(item, Actuator) and item in self.selection_bar.selection_icons:
             self.drag_start_pos = event.pos()
             self.dragging_item = item
             self.dragging_actuator = None  # Reset dragging actuator
@@ -490,6 +495,7 @@ class ActuatorCanvas(QGraphicsView):
             self.show_context_menu(item, event.pos())
         else:
             super().mousePressEvent(event)
+
 
     def mouseMoveEvent(self, event):
         if self.panning:
@@ -508,6 +514,7 @@ class ActuatorCanvas(QGraphicsView):
         else:
             super().mouseMoveEvent(event)
 
+
     def mouseReleaseEvent(self, event):
         if self.panning:
             self.panning = False
@@ -525,10 +532,12 @@ class ActuatorCanvas(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
 
+
     def update_dragging_item(self, event):
         if hasattr(self, 'dragging_actuator') and self.dragging_actuator:
             pos = self.mapToScene(event.pos())
             self.dragging_actuator.setPos(pos.x(), pos.y())
+
 
     def start_dragging_item(self, event):
         item = self.dragging_item
@@ -538,6 +547,7 @@ class ActuatorCanvas(QGraphicsView):
             self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
             self.dragging_actuator = self.actuators[-1]  # Reference to the newly created actuator
             self.drag_start_pos = event.pos()  # Update drag start position
+
 
     def wheelEvent(self, event: QWheelEvent):
         zoom_factor = 1.05  # Reduced from 1.25 to make zooming less sensitive
@@ -560,32 +570,6 @@ class ActuatorCanvas(QGraphicsView):
         super().resizeEvent(event)
         self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
-    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
-        if new_id is None:
-            new_id = self.generate_next_id()
-        
-        branch = new_id.split('.')[0]
-        if branch not in self.branch_colors:
-            if self.color_index < len(COLOR_LIST):
-                self.branch_colors[branch] = COLOR_LIST[self.color_index]
-                self.color_index += 1
-            else:
-                self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
-        color = self.branch_colors[branch]
-
-        if predecessor is None or successor is None:
-            predecessor, successor = self.get_predecessor_successor(new_id)
-
-        actuator = Actuator(x, y, self.actuator_size, color, actuator_type, new_id, predecessor, successor)
-        self.scene.addItem(actuator)
-        self.actuators.append(actuator)
-
-        # Update the predecessor's successor
-        if predecessor:
-            for act in self.actuators:
-                if act.id == predecessor:
-                    act.successor = new_id
-                    break
 
     def generate_next_id(self):
         if not self.actuators:
@@ -620,6 +604,7 @@ class ActuatorCanvas(QGraphicsView):
             self.edit_actuator_properties(actuator)
         elif action == delete_action:
             self.remove_actuator(actuator)
+
 
     def edit_actuator_properties(self, actuator):
         dialog = ActuatorPropertiesDialog(actuator, self)
@@ -656,6 +641,9 @@ class ActuatorCanvas(QGraphicsView):
             
             # Update other actuators if necessary
             self.update_related_actuators(old_id, new_id)
+
+            self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
+            # print(new_id, new_type, actuator.color.name())
 
     def update_related_actuators(self, old_id, new_id):
         for act in self.actuators:
@@ -717,7 +705,7 @@ class ActuatorCanvas(QGraphicsView):
             actuator.update()
 
         self.update()
-
+    
     def clear_canvas(self):
         for actuator in self.actuators:
             self.scene.removeItem(actuator)
@@ -725,7 +713,6 @@ class ActuatorCanvas(QGraphicsView):
         self.branch_colors.clear()
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
-
 
 
 class ActuatorPropertiesDialog(QDialog):
@@ -874,6 +861,7 @@ class CreateBranchDialog(QDialog):
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -897,6 +885,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Initialize dictionaries to store signals
         self.custom_signals = {}  # Dictionary to store custom signals
         self.signal_templates = {}  # Dictionary to store provided signal templates
+        self.imported_signals = {}  # Dictionary to store imported signals
 
         # Initialize the tree widget
         self.setup_tree_widget()
@@ -908,7 +897,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add ActuatorCanvas to the layout with a fixed height
         self.actuator_canvas = ActuatorCanvas(self.ui.widget_2)
         self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
-        self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)   
+        self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
 
         # Connect clear button to clear_plot method
         self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
@@ -918,6 +907,94 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         self.signal_counter = 1  # Counter for naming saved signals
         self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
+
+        # Connect the import waveform action to the import_waveform method
+        self.ui.actionImport_Waveform.triggered.connect(self.import_waveform)
+
+        # Connect the actuator_added signal to the add_actuator_to_timeline slot
+        self.actuator_canvas.actuator_added.connect(self.add_actuator_to_timeline)
+
+        # Setup scroll area for timeline
+        self.timeline_layout = QVBoxLayout(self.ui.scrollAreaWidgetContents)
+
+        # Dictionary to store references to timeline widgets
+        self.timeline_widgets = {}
+
+        # Connect the properties_changed signal to the update_timeline_actuator slot
+        self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
+
+    def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
+        # Create a new QWidget to represent the actuator in the timeline
+        actuator_widget = QWidget()
+        actuator_widget.setStyleSheet(f"background-color: {color};")
+        actuator_layout = QHBoxLayout(actuator_widget)
+        actuator_label = QLabel(f"{actuator_type} - {new_id}")
+        actuator_layout.addWidget(actuator_label)
+        
+        # Add the new actuator widget to the timeline layout
+        self.timeline_layout.addWidget(actuator_widget)
+
+        # Store the reference to the timeline widget
+        self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
+
+    def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
+        if old_actuator_id in self.timeline_widgets:
+            actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
+            actuator_widget.setStyleSheet(f"background-color: {color};")
+            actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
+
+            # Store the updated reference with the new ID
+            self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+
+
+    def import_waveform(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
+        if file_path:
+            try:
+                with open(file_path, 'r') as file:
+                    data = json.load(file)
+                    print(f"JSON Data: {json.dumps(data, indent=2)}")  # Debugging print statement
+                    # Assuming the waveform data is under 'value0' and is a list of y-values
+                    waveform = self.extract_waveform(data)
+                    if waveform is not None:
+                        self.add_imported_waveform(file_path, waveform)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to import waveform: {e}")
+
+    def extract_waveform(self, data):
+        try:
+            # Extract gain and use it to generate a sine waveform
+            gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+            # Generate a simple sine wave using the gain value
+            t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
+            waveform = gain * np.sin(2 * np.pi * t)
+            print(f"Waveform length: {len(waveform)}")  # Debugging print statement
+            return waveform
+        except KeyError as e:
+            print(f"KeyError: {e}")
+            return None
+
+    def add_imported_waveform(self, file_path, waveform):
+        imports_item = None
+        # Find or create the Imports item
+        for i in range(self.ui.treeWidget.topLevelItemCount()):
+            top_item = self.ui.treeWidget.topLevelItem(i)
+            if top_item.text(0) == "Imported Signals":
+                imports_item = top_item
+                break
+        if imports_item is None:
+            imports_item = QTreeWidgetItem(self.ui.treeWidget)
+            imports_item.setText(0, "Imported Signals")
+            imports_item.setToolTip(0, "Imported Signals")
+
+        waveform_name = os.path.basename(file_path)
+        child = QTreeWidgetItem(imports_item)
+        child.setText(0, waveform_name)
+        child.setToolTip(0, waveform_name)
+        self.imported_signals[waveform_name] = waveform
+        child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
+        child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
+
 
     def create_actuator_branch(self):
         dialog = CreateBranchDialog(self)
@@ -963,6 +1040,10 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.customizes.setText(0, "Customized Signals")
         self.customizes.setToolTip(0, "Customized Signals")  # Set tooltip
 
+        self.imports = QTreeWidgetItem(tree)
+        self.imports.setText(0, "Imported Signals")
+        self.imports.setToolTip(0, "Imported Signals")  # Set tooltip
+
         # Add child items to "Oscillators"
         osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
         for item in osc_items:
@@ -1003,6 +1084,10 @@ class Haptics_App(QtWidgets.QMainWindow):
             template_signal = self.signal_templates.get(signal_type)
             if template_signal is not None:
                 self.maincanvas.add_signal(template_signal, combine=False)
+        elif signal_type in self.imported_signals:  # Check if it's an imported signal
+            imported_signal = self.imported_signals.get(signal_type)
+            if imported_signal is not None:
+                self.maincanvas.add_signal(imported_signal, combine=False)
         else:
             self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
 
@@ -1035,7 +1120,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         elif signal_type == "Exponential Decay":
             return np.exp(-5 * t)
         elif signal_type == "PolyBezier":
-            return t**3 - 3 * t
+            return t**3 - 3 * t**2 + 3 * t
         elif signal_type == "Signal Envelope":
             return np.abs(np.sin(2 * np.pi * 3 * t))
         elif signal_type in self.custom_signals:  # Check if it's a custom signal
@@ -1075,15 +1160,34 @@ class Haptics_App(QtWidgets.QMainWindow):
     def on_tree_item_changed(self, item, column):
         old_name = item.data(column, QtCore.Qt.ItemDataRole.UserRole)
         new_name = item.text(column)
-        if old_name and old_name in self.custom_signals:
+        if item.parent() == self.customizes and old_name in self.custom_signals:
             self.custom_signals[new_name] = self.custom_signals.pop(old_name)
             item.setData(column, QtCore.Qt.ItemDataRole.UserRole, new_name)
             item.setToolTip(0, new_name)  # Update tooltip
+        elif item.parent() and item.parent().text(0) == "Imported Signals" and old_name in self.imported_signals:
+            self.imported_signals[new_name] = self.imported_signals.pop(old_name)
+            item.setData(column, QtCore.Qt.ItemDataRole.UserRole, new_name)
+            item.setToolTip(0, new_name)  # Update tooltip
 
+    def delete_tree_item(self, item):
+        signal_name = item.text(0)
+        if item.parent() == self.customizes:
+            if signal_name in self.custom_signals:
+                del self.custom_signals[signal_name]
+            index = self.customizes.indexOfChild(item)
+            if index != -1:
+                self.customizes.takeChild(index)
+        elif item.parent() and item.parent().text(0) == "Imported Signals":
+            if signal_name in self.imported_signals:
+                del self.imported_signals[signal_name]
+            index = item.parent().indexOfChild(item)
+            if index != -1:
+                item.parent().takeChild(index)
+                
     @pyqtSlot(QtCore.QPoint)
     def on_custom_context_menu(self, point):
         item = self.ui.treeWidget.itemAt(point)
-        if item and item.parent() == self.customizes:
+        if item:
             menu = QtWidgets.QMenu(self)
             delete_action = menu.addAction("Delete")
             rename_action = menu.addAction("Rename")
@@ -1091,7 +1195,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             action = menu.exec(self.ui.treeWidget.mapToGlobal(point))
 
             if action == delete_action:
-                self.delete_custom_signal(item)
+                self.delete_tree_item(item)
             elif action == rename_action:
                 self.ui.treeWidget.editItem(item)
 
@@ -1103,6 +1207,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         if index != -1:
             self.customizes.takeChild(index)
 
+
 class Worker(QtCore.QRunnable):
     def __init__(self, function, *args, **kwargs):
         super().__init__()
@@ -1113,6 +1218,7 @@ class Worker(QtCore.QRunnable):
     @pyqtSlot()
     def run(self):
         self.function(*self.args, **self.kwargs)
+
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
