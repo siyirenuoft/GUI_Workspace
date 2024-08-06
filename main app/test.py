@@ -89,18 +89,18 @@ class MplCanvas(FigureCanvas):
         self.axes.spines['left'].set_color(spine_color)
         self.draw()
 
-
-    def add_signal(self, new_signal, combine=False):
+    def add_signal(self, signal_data, combine):
+        new_signal = np.array(signal_data["data"])
+        # print("new",new_signal)
         if combine and self.current_signal is not None:
-            # Ensure both signals are of the same data type before adding
-            self.current_signal = self.current_signal.astype(np.float64)
-            new_signal = new_signal.astype(np.float64)
-            self.current_signal += new_signal
+            #print("current",self.current_signal)
+            # print("new",new_signal)
+            self.current_signal = self.current_signal + new_signal
+            #print("combine", self.current_signal)
         else:
             self.current_signal = new_signal
         t = np.linspace(0, 1, len(self.current_signal))
         self.plot(t, self.current_signal)
-
 
     def clear_plot(self):
         self.current_signal = None
@@ -115,31 +115,53 @@ class MplCanvas(FigureCanvas):
     def dropEvent(self, event):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
-        self.app_reference.add_signal(signal_type, combine=True)  # Use app_reference with combine=True
+        if signal_type in self.app_reference.imported_signals:  # Check if it's an imported signal
+            imported_signal = self.app_reference.imported_signals.get(signal_type)
+            # print(imported_signal)
+            self.add_signal(imported_signal, combine=True)
+        elif signal_type in self.app_reference.custom_signals:  # Check if it's a custom signal
+            custom_signal = self.app_reference.custom_signals.get(signal_type)
+            self.add_signal(custom_signal, combine=True)
+        elif signal_type in self.app_reference.signal_templates:  # Check if it's a provided signal template
+            template_signal = self.app_reference.signal_templates.get(signal_type)
+            self.add_signal(template_signal, combine=True)
+        else:
+            self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
+
+    # def dropEvent(self, event):
+    #     item = event.source().selectedItems()[0]
+    #     signal_type = item.text(0)
+    #     print(f"dropEvent - signal_type: {signal_type}")
+    #     if signal_type in self.app_reference.imported_signals:
+    #         signal_data = self.app_reference.imported_signals[signal_type]
+    #         print(f"dropEvent - signal_data: {signal_data}")
+    #         self.app_reference.add_signal(signal_type, combine=True)
+    #     else:
+    #         print("dropEvent - signal not found in imported_signals")
 
 
 # Define the ACTUATOR_CONFIG dictionary
 ACTUATOR_CONFIG = {
     "LRA": {
-        "text_vertical_offset": 0,
-        "text_horizontal_offset": 0,
-        "font_size_factor": 0.4,
-        "min_font_size": 8,
-        "max_font_size": 16
+        "text_vertical_offset": -0.5,
+        "text_horizontal_offset": 0.5,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
     },
     "VCA": {
-        "text_vertical_offset": 0,
-        "text_horizontal_offset": 0,
-        "font_size_factor": 0.4,
-        "min_font_size": 8,
-        "max_font_size": 16
+        "text_vertical_offset": -1,
+        "text_horizontal_offset": 0.25,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
     },
     "M": {
-        "text_vertical_offset": 0,
-        "text_horizontal_offset": 0,
-        "font_size_factor": 0.4,
-        "min_font_size": 8,
-        "max_font_size": 16
+        "text_vertical_offset": -0.8,
+        "text_horizontal_offset": 0.25,
+        "font_size_factor": 0.9,
+        "min_font_size": 6,
+        "max_font_size": 12
     }
 }
 
@@ -200,6 +222,9 @@ class Actuator(QGraphicsItem):
         self.font_size_factor = config["font_size_factor"]
         self.min_font_size = config["min_font_size"]
         self.max_font_size = config["max_font_size"]
+
+        # Calculate initial font size
+        self.font_size = self.calculate_font_size()        
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -363,13 +388,12 @@ class ActuatorPropertiesDialog(QDialog):
 class SelectionBar(QGraphicsItem):
     def __init__(self, scene, parent=None):
         super().__init__()
-        self.setPos(0, 70)  # Default location in the top left corner
+        self.setPos(10, 10)  # Default location in the top left corner
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
         self.selection_icons = []
         self.scene = scene
         self.create_selection_icons()
-
 
     def create_selection_icons(self):
         actuator_types = ["LRA", "VCA", "M"]
@@ -377,10 +401,11 @@ class SelectionBar(QGraphicsItem):
             icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
             icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-            icon.setParentItem(self)  # Set the parent to SelectionBar
-            icon.setPos(-30, i * 40)  # Adjust X and Y position of each icon
+            icon.setPos(i*30 ,0)
+            icon.setPos(-100, i * 30)
             icon.adjust_font_size(0.3, 6, 12)  # Adjust font size here
             self.selection_icons.append(icon)
+            self.scene.addItem(icon)
 
 
 class ActuatorCanvas(QGraphicsView):
@@ -410,12 +435,31 @@ class ActuatorCanvas(QGraphicsView):
         self.setMouseTracking(True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
+        self.setAcceptDrops(True)  # Allow drop events
+
         self.panning = False
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
-        self.selection_bar = SelectionBar(self.scene)
-        self.scene.addItem(self.selection_bar)
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasText():
+            actuator_type = event.mimeData().text()
+            pos = self.mapToScene(event.position().toPoint())
+            
+            # Check if the drop position is within the allowed "white area"
+            if self.is_drop_allowed(pos):
+                self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
+                event.acceptProposedAction()
+            else:
+                event.ignore()
 
     def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
         if new_id is None:
@@ -446,6 +490,8 @@ class ActuatorCanvas(QGraphicsView):
                 if act.id == predecessor:
                     act.successor = new_id
                     break
+
+        actuator.update()
 
     def is_drop_allowed(self, pos):
         return self.canvas_rect.contains(pos)
@@ -482,7 +528,11 @@ class ActuatorCanvas(QGraphicsView):
 
     def mousePressEvent(self, event):
         item = self.itemAt(event.pos())
-        if isinstance(item, Actuator) and item in self.selection_bar.selection_icons:
+        parent_app = self.window()  # Get the main window (Haptics_App)
+
+        # Check if the item is in the selection view's scene
+        selection_items = parent_app.selection_view.scene().items()
+        if isinstance(item, Actuator) and item in selection_items:
             self.drag_start_pos = event.pos()
             self.dragging_item = item
             self.dragging_actuator = None  # Reset dragging actuator
@@ -547,6 +597,18 @@ class ActuatorCanvas(QGraphicsView):
             self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
             self.dragging_actuator = self.actuators[-1]  # Reference to the newly created actuator
             self.drag_start_pos = event.pos()  # Update drag start position
+
+            # Example of using QPixmap if applicable
+            pixmap = QPixmap(100, 100)  # Ensure pixmap is properly initialized
+            if pixmap.isNull():
+                print("Error: QPixmap is null")
+            else:
+                scaled_pixmap = pixmap.scaled(50, 50, Qt.AspectRatioMode.KeepAspectRatio)
+                drag = QDrag(self)
+                mime_data = QMimeData()
+                drag.setMimeData(mime_data)
+                drag.setPixmap(scaled_pixmap)
+                drag.exec()
 
 
     def wheelEvent(self, event: QWheelEvent):
@@ -713,6 +775,28 @@ class ActuatorCanvas(QGraphicsView):
         self.branch_colors.clear()
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
+
+
+class SelectionBarView(QGraphicsView):
+    def __init__(self, scene, parent=None):
+        super().__init__(parent)
+        self.setScene(scene)
+        self.setRenderHints(QPainter.RenderHint.Antialiasing)
+        self.setFixedSize(100, 100)  # Adjust size as needed
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if isinstance(item, Actuator):
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setText(item.actuator_type)
+            drag.setMimeData(mime_data)
+            drag.exec(Qt.DropAction.CopyAction)
+        super().mousePressEvent(event)
 
 
 class ActuatorPropertiesDialog(QDialog):
@@ -899,6 +983,15 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
         self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
 
+        # Create a scene for the selection bar
+        self.selection_scene = QGraphicsScene()
+
+        # Create the selection bar view and add it to the layout
+        self.selection_bar = SelectionBar(self.selection_scene)
+        self.selection_view = SelectionBarView(self.selection_scene, self.ui.widget_2)
+        self.selection_view.setFixedSize(100, 100)  # Set size and position as needed
+        self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
+
         # Connect clear button to clear_plot method
         self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
         
@@ -946,7 +1039,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
 
-
     def import_waveform(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
         if file_path:
@@ -957,24 +1049,12 @@ class Haptics_App(QtWidgets.QMainWindow):
                     # Assuming the waveform data is under 'value0' and is a list of y-values
                     waveform = self.extract_waveform(data)
                     if waveform is not None:
-                        self.add_imported_waveform(file_path, waveform)
+                        data["data"] = waveform.tolist()
+                        self.add_imported_waveform(file_path, data)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to import waveform: {e}")
 
-    def extract_waveform(self, data):
-        try:
-            # Extract gain and use it to generate a sine waveform
-            gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
-            # Generate a simple sine wave using the gain value
-            t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
-            waveform = gain * np.sin(2 * np.pi * t)
-            print(f"Waveform length: {len(waveform)}")  # Debugging print statement
-            return waveform
-        except KeyError as e:
-            print(f"KeyError: {e}")
-            return None
-
-    def add_imported_waveform(self, file_path, waveform):
+    def add_imported_waveform(self, file_path, waveform_data):
         imports_item = None
         # Find or create the Imports item
         for i in range(self.ui.treeWidget.topLevelItemCount()):
@@ -991,9 +1071,43 @@ class Haptics_App(QtWidgets.QMainWindow):
         child = QTreeWidgetItem(imports_item)
         child.setText(0, waveform_name)
         child.setToolTip(0, waveform_name)
-        self.imported_signals[waveform_name] = waveform
+        self.imported_signals[waveform_name] = waveform_data
         child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
         child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
+
+    # No normalization (the one to use ****)
+    # def extract_waveform(self, data):
+    #     try:
+    #         # Extract gain and use it to generate a sine waveform
+    #         gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+    #         # Generate a simple sine wave using the gain value
+    #         t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
+    #         waveform = gain * np.sin(2 * np.pi * t)
+    #         print(f"Waveform length: {len(waveform)}")  # Debugging print statement
+    #         return waveform
+    #     except KeyError as e:
+    #         print(f"KeyError: {e}")
+    #         return None
+        
+    def extract_waveform(self, data):
+        try:
+            # Extract gain and use it to generate a sine waveform
+            gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+            
+            # Generate a simple sine wave using the gain value
+            t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
+            waveform = gain * np.sin(2 * np.pi * t)
+            
+            # Normalize the waveform from -500 to 500 range to -1 to 1
+            max_val = 500
+            min_val = -500
+            normalized_waveform = 2 * (waveform - min_val) / (max_val - min_val) - 1
+            
+            print(f"Normalized Waveform length: {len(normalized_waveform)}")  # Debugging print statement
+            return normalized_waveform
+        except KeyError as e:
+            print(f"KeyError: {e}")
+            return None
 
 
     def create_actuator_branch(self):
@@ -1092,44 +1206,85 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
 
     def generate_signal(self, signal_type):
-        t = np.linspace(0, 1, 500)
+        base_signal = {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": 628.3185307179587,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": []
+        }
+
+        t = np.linspace(0, 1, 500).tolist()  # Convert numpy array to list
         if signal_type == "Sine":
-            return np.sin(2 * np.pi * 10 * t)
+            base_signal["data"] = np.sin(2 * np.pi * 10 * np.array(t)).tolist()
         elif signal_type == "Square":
-            return np.sign(np.sin(2 * np.pi * 10 * t))
+            base_signal["data"] = np.sign(np.sin(2 * np.pi * 10 * np.array(t))).tolist()
         elif signal_type == "Saw":
-            return 2 * (t - np.floor(t + 0.5))
+            base_signal["data"] = (2 * (np.array(t) - np.floor(np.array(t) + 0.5))).tolist()
         elif signal_type == "Triangle":
-            return 2 * np.abs(2 * (t - np.floor(t + 0.5))) - 1
+            base_signal["data"] = (2 * np.abs(2 * (np.array(t) - np.floor(np.array(t) + 0.5))) - 1).tolist()
         elif signal_type == "Chirp":
-            return np.sin(2 * np.pi * t**2)
+            base_signal["data"] = (np.sin(2 * np.pi * np.array(t)**2)).tolist()
         elif signal_type == "FM":
-            return np.sin(2 * np.pi * (10 * t + np.sin(2 * np.pi * 0.5 * t)))
+            base_signal["data"] = (np.sin(2 * np.pi * (10 * np.array(t) + np.sin(2 * np.pi * 0.5 * np.array(t))))).tolist()
         elif signal_type == "PWM":
-            return np.where(np.sin(2 * np.pi * 10 * t) >= 0, 1, -1)
+            base_signal["data"] = (np.where(np.sin(2 * np.pi * 10 * np.array(t)) >= 0, 1, -1)).tolist()
         elif signal_type == "Noise":
-            return np.random.normal(0, 1, len(t))
+            base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
         elif signal_type == "Envelope":
-            return np.linspace(0, 1, 500) * np.sin(2 * np.pi * 5 * t)
+            base_signal["data"] = (np.linspace(0, 1, 500) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
         elif signal_type == "Keyed Envelope":
-            return np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)
+            base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
         elif signal_type == "ASR":
-            return np.piecewise(t, [t < 0.3, t >= 0.3], [lambda t: 3.33 * t, 1])
+            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.3, np.array(t) >= 0.3], [lambda t: 3.33 * t, 1])).tolist()
         elif signal_type == "ADSR":
-            return np.piecewise(t, [t < 0.1, t < 0.2, t < 0.5, t < 0.7, t >= 0.7], [lambda t: 10 * t, lambda t: 1 - 5 * (t - 0.1), 0.5, lambda t: 0.5 - 0.25 * (t - 0.5), 0.25])
+            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.1, np.array(t) < 0.2, np.array(t) < 0.5, np.array(t) < 0.7, np.array(t) >= 0.7], [lambda t: 10 * t, lambda t: 1 - 5 * (t - 0.1), 0.5, lambda t: 0.5 - 0.25 * (t - 0.5), 0.25])).tolist()
         elif signal_type == "Exponential Decay":
-            return np.exp(-5 * t)
+            base_signal["data"] = (np.exp(-5 * np.array(t))).tolist()
         elif signal_type == "PolyBezier":
-            return t**3 - 3 * t**2 + 3 * t
+            base_signal["data"] = (np.array(t)**3 - 3 * np.array(t)**2 + 3 * np.array(t)).tolist()
         elif signal_type == "Signal Envelope":
-            return np.abs(np.sin(2 * np.pi * 3 * t))
+            base_signal["data"] = (np.abs(np.sin(2 * np.pi * 3 * np.array(t)))).tolist()
         elif signal_type in self.custom_signals:  # Check if it's a custom signal
-            return self.custom_signals.get(signal_type, np.zeros_like(t))
+            base_signal["data"] = self.custom_signals.get(signal_type, {"data": np.zeros_like(t).tolist()})["data"]
         else:
-            return np.zeros_like(t)
+            base_signal["data"] = np.zeros_like(t).tolist()
+
+        return base_signal
 
     def add_signal(self, signal_type, combine):
+        print("@@@@@@@@@@@@@@@@@@@@@@@@@@")
         new_signal = self.generate_signal(signal_type)
+        print(new_signal)
         self.maincanvas.add_signal(new_signal, combine=combine)
 
     def signal_exists(self, signal):
@@ -1143,7 +1298,43 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     def save_current_signal(self):
         if self.maincanvas.current_signal is not None:
-            if self.signal_exists(self.maincanvas.current_signal):
+            signal_data = {
+                "value0": {
+                    "gain": 1.0,
+                    "bias": 0.0,
+                    "m_ptr": {
+                        "polymorphic_id": 2147483649,
+                        "polymorphic_name": f"tact::Signal::Model<tact::Custom>",
+                        "ptr_wrapper": {
+                            "valid": 1,
+                            "data": {
+                                "Concept": {},
+                                "m_model": {
+                                    "IOscillator": {
+                                        "x": {
+                                            "gain": 628.3185307179587,
+                                            "bias": 0.0,
+                                            "m_ptr": {
+                                                "polymorphic_id": 2147483650,
+                                                "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                                "ptr_wrapper": {
+                                                    "valid": 1,
+                                                    "data": {
+                                                        "Concept": {},
+                                                        "m_model": {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "data": self.maincanvas.current_signal.tolist()
+            }
+            if self.signal_exists(signal_data):
                 QMessageBox.information(self, "Reminder", "Signal Already Exist!", QMessageBox.StandardButton.Ok)
             else:
                 signal_name = f"Signal {self.signal_counter}"
@@ -1154,7 +1345,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
                 child.setData(0, QtCore.Qt.ItemDataRole.UserRole, signal_name)  # Store the original name
                 self.customizes.addChild(child)
-                self.custom_signals[signal_name] = self.maincanvas.current_signal.copy()  # Save the signal data
+                self.custom_signals[signal_name] = signal_data  # Save the signal data
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_changed(self, item, column):

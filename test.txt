@@ -90,8 +90,9 @@ class MplCanvas(FigureCanvas):
         self.draw()
 
     def add_signal(self, signal_data, combine):
+        print("ni xx", signal_data)
         new_signal = np.array(signal_data["data"])
-        # print("new",new_signal)
+        print("new",new_signal)
         if combine and self.current_signal is not None:
             #print("current",self.current_signal)
             # print("new",new_signal)
@@ -115,29 +116,8 @@ class MplCanvas(FigureCanvas):
     def dropEvent(self, event):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
-        if signal_type in self.app_reference.imported_signals:  # Check if it's an imported signal
-            imported_signal = self.app_reference.imported_signals.get(signal_type)
-            # print(imported_signal)
-            self.add_signal(imported_signal, combine=True)
-        elif signal_type in self.app_reference.custom_signals:  # Check if it's a custom signal
-            custom_signal = self.app_reference.custom_signals.get(signal_type)
-            self.add_signal(custom_signal, combine=True)
-        elif signal_type in self.app_reference.signal_templates:  # Check if it's a provided signal template
-            template_signal = self.app_reference.signal_templates.get(signal_type)
-            self.add_signal(template_signal, combine=True)
-        else:
-            self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
-
-    # def dropEvent(self, event):
-    #     item = event.source().selectedItems()[0]
-    #     signal_type = item.text(0)
-    #     print(f"dropEvent - signal_type: {signal_type}")
-    #     if signal_type in self.app_reference.imported_signals:
-    #         signal_data = self.app_reference.imported_signals[signal_type]
-    #         print(f"dropEvent - signal_data: {signal_data}")
-    #         self.app_reference.add_signal(signal_type, combine=True)
-    #     else:
-    #         print("dropEvent - signal not found in imported_signals")
+        self.app_reference.add_signal(signal_type, combine=True)  # Use app_reference with combine=True
+        
 
 
 # Define the ACTUATOR_CONFIG dictionary
@@ -1282,9 +1262,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         return base_signal
 
     def add_signal(self, signal_type, combine):
-        print("@@@@@@@@@@@@@@@@@@@@@@@@@@")
         new_signal = self.generate_signal(signal_type)
-        print(new_signal)
         self.maincanvas.add_signal(new_signal, combine=combine)
 
     def signal_exists(self, signal):
