@@ -411,6 +411,7 @@ class SelectionBar(QGraphicsItem):
 class ActuatorCanvas(QGraphicsView):
     actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
     properties_changed = pyqtSignal(str, str, str, str)
+    actuator_deleted = pyqtSignal(str)  # Signal to indicate an actuator is deleted
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -718,6 +719,7 @@ class ActuatorCanvas(QGraphicsView):
     def remove_actuator(self, actuator):
         self.scene.removeItem(actuator)
         self.actuators.remove(actuator)
+        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -1015,6 +1017,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Connect the properties_changed signal to the update_timeline_actuator slot
         self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
+        self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         # Create a new QWidget to represent the actuator in the timeline
@@ -1038,6 +1041,12 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+            
+    def remove_actuator_from_timeline(self, actuator_id):
+        if actuator_id in self.timeline_widgets:
+            actuator_widget, actuator_label = self.timeline_widgets.pop(actuator_id)
+            self.timeline_layout.removeWidget(actuator_widget)
+            actuator_widget.deleteLater()  # Properly delete the widget
 
     def import_waveform(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
@@ -1282,7 +1291,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         return base_signal
 
     def add_signal(self, signal_type, combine):
-        print("@@@@@@@@@@@@@@@@@@@@@@@@@@")
         new_signal = self.generate_signal(signal_type)
         print(new_signal)
         self.maincanvas.add_signal(new_signal, combine=combine)
