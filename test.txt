@@ -26,6 +26,12 @@ from PyQt6.QtCore import Qt, pyqtSlot, QPoint
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
 from PyQt6.QtCore import pyqtSignal
 
+
+def to_subscript(text):
+    subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
+    return text.translate(subscript_map)
+
+
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -90,9 +96,8 @@ class MplCanvas(FigureCanvas):
         self.draw()
 
     def add_signal(self, signal_data, combine):
-        print("ni xx", signal_data)
         new_signal = np.array(signal_data["data"])
-        print("new",new_signal)
+        # print("new",new_signal)
         if combine and self.current_signal is not None:
             #print("current",self.current_signal)
             # print("new",new_signal)
@@ -116,8 +121,29 @@ class MplCanvas(FigureCanvas):
     def dropEvent(self, event):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
-        self.app_reference.add_signal(signal_type, combine=True)  # Use app_reference with combine=True
-        
+        if signal_type in self.app_reference.imported_signals:  # Check if it's an imported signal
+            imported_signal = self.app_reference.imported_signals.get(signal_type)
+            # print(imported_signal)
+            self.add_signal(imported_signal, combine=True)
+        elif signal_type in self.app_reference.custom_signals:  # Check if it's a custom signal
+            custom_signal = self.app_reference.custom_signals.get(signal_type)
+            self.add_signal(custom_signal, combine=True)
+        elif signal_type in self.app_reference.signal_templates:  # Check if it's a provided signal template
+            template_signal = self.app_reference.signal_templates.get(signal_type)
+            self.add_signal(template_signal, combine=True)
+        else:
+            self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
+
+    # def dropEvent(self, event):
+    #     item = event.source().selectedItems()[0]
+    #     signal_type = item.text(0)
+    #     print(f"dropEvent - signal_type: {signal_type}")
+    #     if signal_type in self.app_reference.imported_signals:
+    #         signal_data = self.app_reference.imported_signals[signal_type]
+    #         print(f"dropEvent - signal_data: {signal_data}")
+    #         self.app_reference.add_signal(signal_type, combine=True)
+    #     else:
+    #         print("dropEvent - signal not found in imported_signals")
 
 
 # Define the ACTUATOR_CONFIG dictionary
@@ -178,7 +204,6 @@ def generate_contrasting_color(existing_colors):
             return new_color
 
 
-
 class Actuator(QGraphicsItem):
     properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
 
@@ -204,7 +229,7 @@ class Actuator(QGraphicsItem):
         self.max_font_size = config["max_font_size"]
 
         # Calculate initial font size
-        self.font_size = self.calculate_font_size()        
+        self.font_size = self.calculate_font_size()
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -228,7 +253,7 @@ class Actuator(QGraphicsItem):
         return "Unknown"
 
     def boundingRect(self):
-        return QRectF(-self.size/2, -self.size/2, self.size, self.size)
+        return QRectF(-self.size / 2, -self.size / 2, self.size, self.size)
 
     def paint(self, painter, option, widget):
         painter.setBrush(QBrush(self.color))
@@ -246,15 +271,23 @@ class Actuator(QGraphicsItem):
         font.setPointSizeF(self.calculate_font_size())
         painter.setFont(font)
         
+        # Convert the ID to the desired format
+        if '.' in self.id:
+            main_id, sub_id = self.id.split('.')
+            formatted_id = main_id + to_subscript(sub_id)
+        else:
+            formatted_id = self.id  # Handle cases where ID does not contain a '.'
+        
         # Calculate text position
         rect = self.boundingRect()
         text_rect = QRectF(rect.left() + self.text_horizontal_offset,
-                           rect.top() + self.text_vertical_offset,
-                           rect.width(),
-                           rect.height())
+                        rect.top() + self.text_vertical_offset,
+                        rect.width(),
+                        rect.height())
         
         # Draw text
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.id)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, formatted_id)
+
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -294,7 +327,6 @@ class Actuator(QGraphicsItem):
         if new_pos != self.pos():
             self.setPos(new_pos)
 
-    
     def adjust_text_position(self, vertical_offset, horizontal_offset):
         self.text_vertical_offset = vertical_offset
         self.text_horizontal_offset = horizontal_offset
@@ -311,6 +343,7 @@ class Actuator(QGraphicsItem):
         self.color = color
         self.update()
         self.properties_changed.emit(self.id, self.actuator_type, self.color.name())
+
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -391,6 +424,7 @@ class SelectionBar(QGraphicsItem):
 class ActuatorCanvas(QGraphicsView):
     actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
     properties_changed = pyqtSignal(str, str, str, str)
+    actuator_deleted = pyqtSignal(str)  # Signal to indicate an actuator is deleted
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -478,26 +512,32 @@ class ActuatorCanvas(QGraphicsView):
 
 
     def update_canvas_visuals(self):
+        # Remove the old white rectangle if it exists
         if self.white_rect_item:
             self.scene.removeItem(self.white_rect_item)
-        
-        # Set canvas color to a custom RGB value, e.g., (240, 235, 229)
-        self.colored_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
-        self.colored_rect_item.setZValue(-999)
+            self.white_rect_item = None
 
+        # Remove the old scale line and text if they exist
         if self.scale_line:
             self.scene.removeItem(self.scale_line)
+            self.scale_line = None
         if self.scale_text:
             self.scene.removeItem(self.scale_text)
+            self.scale_text = None
 
+        # Add the new white rectangle
+        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.white))
+        self.white_rect_item.setZValue(-999)
+
+        # Add the new scale line and text
         self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                             self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
-                                             QPen(Qt.GlobalColor.black, 2))
+                                            self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
+                                            QPen(Qt.GlobalColor.black, 2))
         self.scale_text = self.scene.addText("100 mm")
-        text_rect = self.scale_text.boundingRect()
-        self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
+        self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 15)
         self.scale_line.setZValue(1000)
         self.scale_text.setZValue(1000)
+
 
     def update_scale_position(self):
         if self.scale_line and self.scale_text:
@@ -698,6 +738,7 @@ class ActuatorCanvas(QGraphicsView):
     def remove_actuator(self, actuator):
         self.scene.removeItem(actuator)
         self.actuators.remove(actuator)
+        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -926,6 +967,24 @@ class CreateBranchDialog(QDialog):
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
 
+class CanvasSizeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Adjust Canvas Size")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.width_input = QLineEdit()
+        self.height_input = QLineEdit()
+        form_layout.addRow("Width (mm):", self.width_input)
+        form_layout.addRow("Height (mm):", self.height_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -978,6 +1037,12 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Connect save button to save_current_signal method
         self.ui.pushButton_2.clicked.connect(self.save_current_signal)
 
+        # Connect save button to save_current_signal method
+        self.ui.pushButton_3.clicked.connect(self.clear_canvas_and_timeline)
+
+        # Connect "Adjust Size" button to adjust_canvas_size method
+        self.pushButton_4.clicked.connect(self.adjust_canvas_size)
+
         self.signal_counter = 1  # Counter for naming saved signals
         self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
 
@@ -995,6 +1060,20 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Connect the properties_changed signal to the update_timeline_actuator slot
         self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
+        self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
+
+    def clear_canvas_and_timeline(self):
+        self.actuator_canvas.clear_canvas()
+
+    def adjust_canvas_size(self):
+        dialog = CanvasSizeDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                width = int(dialog.width_input.text())
+                height = int(dialog.height_input.text())
+                self.actuator_canvas.set_canvas_size(width, height)
+            except ValueError:
+                print("Invalid input. Please enter valid integer values for width and height.")
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         # Create a new QWidget to represent the actuator in the timeline
@@ -1018,6 +1097,12 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+            
+    def remove_actuator_from_timeline(self, actuator_id):
+        if actuator_id in self.timeline_widgets:
+            actuator_widget, actuator_label = self.timeline_widgets.pop(actuator_id)
+            self.timeline_layout.removeWidget(actuator_widget)
+            actuator_widget.deleteLater()  # Properly delete the widget
 
     def import_waveform(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
@@ -1263,6 +1348,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     def add_signal(self, signal_type, combine):
         new_signal = self.generate_signal(signal_type)
+        print(new_signal)
         self.maincanvas.add_signal(new_signal, combine=combine)
 
     def signal_exists(self, signal):
