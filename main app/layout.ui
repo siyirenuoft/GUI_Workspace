@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1175</width>
+    <width>1196</width>
     <height>742</height>
    </rect>
   </property>
@@ -101,11 +101,6 @@
                      <string>Save Signal</string>
                     </property>
                    </widget>
-                   <widget class="QPushButton" name="pushButton_7">
-                    <property name="text">
-                     <string>Apply</string>
-                    </property>
-                   </widget>
                   </widget>
                  </widget>
                 </item>
@@ -164,31 +159,10 @@
                <layout class="QGridLayout" name="gridLayout_8">
                 <item row="0" column="0">
                  <layout class="QGridLayout" name="gridLayout_7">
-                  <item row="0" column="0">
-                   <widget class="QPushButton" name="pushButton_3">
-                    <property name="text">
-                     <string>Clear</string>
-                    </property>
-                   </widget>
-                  </item>
                   <item row="1" column="0">
                    <widget class="QPushButton" name="pushButton_4">
                     <property name="text">
-                     <string>Adjust Size</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="2" column="0">
-                   <widget class="QPushButton" name="pushButton_5">
-                    <property name="text">
-                     <string>PushButton</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item row="3" column="0">
-                   <widget class="QPushButton" name="pushButton_6">
-                    <property name="text">
-                     <string>PushButton</string>
+                     <string>Canvas Size</string>
                     </property>
                    </widget>
                   </item>
@@ -204,6 +178,20 @@
                      </size>
                     </property>
                    </spacer>
+                  </item>
+                  <item row="0" column="0">
+                   <widget class="QPushButton" name="pushButton_3">
+                    <property name="text">
+                     <string>Clear</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="0">
+                   <widget class="QPushButton" name="pushButton_5">
+                    <property name="text">
+                     <string>Total Time</string>
+                    </property>
+                   </widget>
                   </item>
                  </layout>
                 </item>
@@ -377,7 +365,7 @@
                  <rect>
                   <x>0</x>
                   <y>0</y>
-                  <width>1119</width>
+                  <width>1140</width>
                   <height>175</height>
                  </rect>
                 </property>
@@ -400,7 +388,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1175</width>
+     <width>1196</width>
      <height>22</height>
     </rect>
    </property>

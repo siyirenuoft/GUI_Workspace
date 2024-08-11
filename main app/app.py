@@ -26,12 +26,6 @@ from PyQt6.QtCore import Qt, pyqtSlot, QPoint
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
 from PyQt6.QtCore import pyqtSignal
 
-
-def to_subscript(text):
-    subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
-    return text.translate(subscript_map)
-
-
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -204,6 +198,7 @@ def generate_contrasting_color(existing_colors):
             return new_color
 
 
+
 class Actuator(QGraphicsItem):
     properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
 
@@ -229,7 +224,7 @@ class Actuator(QGraphicsItem):
         self.max_font_size = config["max_font_size"]
 
         # Calculate initial font size
-        self.font_size = self.calculate_font_size()
+        self.font_size = self.calculate_font_size()        
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -253,7 +248,7 @@ class Actuator(QGraphicsItem):
         return "Unknown"
 
     def boundingRect(self):
-        return QRectF(-self.size / 2, -self.size / 2, self.size, self.size)
+        return QRectF(-self.size/2, -self.size/2, self.size, self.size)
 
     def paint(self, painter, option, widget):
         painter.setBrush(QBrush(self.color))
@@ -271,23 +266,15 @@ class Actuator(QGraphicsItem):
         font.setPointSizeF(self.calculate_font_size())
         painter.setFont(font)
         
-        # Convert the ID to the desired format
-        if '.' in self.id:
-            main_id, sub_id = self.id.split('.')
-            formatted_id = main_id + to_subscript(sub_id)
-        else:
-            formatted_id = self.id  # Handle cases where ID does not contain a '.'
-        
         # Calculate text position
         rect = self.boundingRect()
         text_rect = QRectF(rect.left() + self.text_horizontal_offset,
-                        rect.top() + self.text_vertical_offset,
-                        rect.width(),
-                        rect.height())
+                           rect.top() + self.text_vertical_offset,
+                           rect.width(),
+                           rect.height())
         
         # Draw text
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, formatted_id)
-
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.id)
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -327,6 +314,7 @@ class Actuator(QGraphicsItem):
         if new_pos != self.pos():
             self.setPos(new_pos)
 
+    
     def adjust_text_position(self, vertical_offset, horizontal_offset):
         self.text_vertical_offset = vertical_offset
         self.text_horizontal_offset = horizontal_offset
@@ -343,7 +331,6 @@ class Actuator(QGraphicsItem):
         self.color = color
         self.update()
         self.properties_changed.emit(self.id, self.actuator_type, self.color.name())
-
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -512,32 +499,26 @@ class ActuatorCanvas(QGraphicsView):
 
 
     def update_canvas_visuals(self):
-        # Remove the old white rectangle if it exists
         if self.white_rect_item:
             self.scene.removeItem(self.white_rect_item)
-            self.white_rect_item = None
+        
+        # Set canvas color to a custom RGB value, e.g., (240, 235, 229)
+        self.colored_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
+        self.colored_rect_item.setZValue(-999)
 
-        # Remove the old scale line and text if they exist
         if self.scale_line:
             self.scene.removeItem(self.scale_line)
-            self.scale_line = None
         if self.scale_text:
             self.scene.removeItem(self.scale_text)
-            self.scale_text = None
 
-        # Add the new white rectangle
-        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.white))
-        self.white_rect_item.setZValue(-999)
-
-        # Add the new scale line and text
         self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                            self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
-                                            QPen(Qt.GlobalColor.black, 2))
+                                             self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
+                                             QPen(Qt.GlobalColor.black, 2))
         self.scale_text = self.scene.addText("100 mm")
-        self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 15)
+        text_rect = self.scale_text.boundingRect()
+        self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
         self.scale_line.setZValue(1000)
         self.scale_text.setZValue(1000)
-
 
     def update_scale_position(self):
         if self.scale_line and self.scale_text:
@@ -966,103 +947,175 @@ class CreateBranchDialog(QDialog):
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
-class CreateBranchDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Create Actuator Branch")
-        layout = QVBoxLayout(self)
-
-        self.num_actuators_input = QSpinBox()
-        self.num_actuators_input.setMinimum(1)
-        self.num_actuators_input.valueChanged.connect(self.update_max_counts)
-        layout.addWidget(QLabel("Number of Actuators:"))
-        layout.addWidget(self.num_actuators_input)
-
-        self.lra_input = QSpinBox()
-        self.lra_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("LRA Count:"))
-        layout.addWidget(self.lra_input)
-
-        self.vca_input = QSpinBox()
-        self.vca_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("VCA Count:"))
-        layout.addWidget(self.vca_input)
-
-        self.m_input = QSpinBox()
-        self.m_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("M Count:"))
-        layout.addWidget(self.m_input)
-
-        self.grid_pattern_input = QLineEdit()
-        self.grid_pattern_input.textChanged.connect(self.validate_inputs)
-        layout.addWidget(QLabel("Grid Pattern (e.g., 2x2, 3x3):"))
-        layout.addWidget(self.grid_pattern_input)
-
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
-
-        self.num_actuators_input.setValue(1)
-        self.update_max_counts()
-        self.validate_inputs()
-
-    def update_max_counts(self):
-        total = self.num_actuators_input.value()
-        self.lra_input.setMaximum(total)
-        self.vca_input.setMaximum(total)
-        self.m_input.setMaximum(total)
-        self.check_total()
-        self.validate_inputs()
-
-    def check_total(self):
-        total = self.num_actuators_input.value()
-        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+class TimelineCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
+        self.app_reference = app_reference  # Reference to Haptics_App
+        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
+        self.axes = self.fig.add_subplot(111)
+        self.axes.set_facecolor(color)
+        self.axes.set_xticks([])
+        self.axes.set_yticks([])
+        self.axes.spines['top'].set_visible(True)
+        self.axes.spines['right'].set_visible(True)
+        self.axes.spines['left'].set_visible(True)
+        self.axes.spines['bottom'].set_visible(True)
         
-        if sum_counts > total:
-            diff = sum_counts - total
-            if self.sender() == self.lra_input:
-                self.lra_input.setValue(max(0, self.lra_input.value() - diff))
-            elif self.sender() == self.vca_input:
-                self.vca_input.setValue(max(0, self.vca_input.value() - diff))
-            elif self.sender() == self.m_input:
-                self.m_input.setValue(max(0, self.m_input.value() - diff))
-            
-            # Recalculate sum_counts after adjustment
-            sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+        super(TimelineCanvas, self).__init__(self.fig)
+        self.setParent(parent)
+        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.setAcceptDrops(True)
+        
+    def update_canvas(self, color, label):
+        self.fig.set_facecolor(color)
+        self.axes.set_facecolor(color)
+        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.draw()
 
-        self.validate_inputs()
-
-    def accept(self):
-        grid_pattern = self.grid_pattern_input.text().strip()
-        if self.lra_input.value() + self.vca_input.value() + self.m_input.value() != self.num_actuators_input.value() or not self.validate_grid_pattern(grid_pattern):
-            self.show_warning("Invalid input. Please ensure the total count matches and the grid pattern is valid.")
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            event.accept()
         else:
-            super().accept()
+            event.ignore()
 
-    def validate_grid_pattern(self, pattern):
-        if not pattern:  # Handle empty pattern
-            return False
-        try:
-            rows, cols = map(int, pattern.split('x'))
-            return rows > 0 and cols > 0  # Just check if it's a valid grid format
-        except ValueError:
-            return False
-        
-    def validate_inputs(self):
-        total = self.num_actuators_input.value()
-        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
-        grid_pattern = self.grid_pattern_input.text().strip()
-        
-        counts_valid = sum_counts == total
-        grid_valid = self.validate_grid_pattern(grid_pattern)
-        
-        is_valid = counts_valid and grid_valid
-        
-        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            signal_type = event.mimeData().text()
 
-    def show_warning(self, message):
-        QMessageBox.warning(self, "Warning", message)
+            # Check if total time is set
+            if self.app_reference.total_time is None:
+                # If total time is not set, prompt the user to set it up
+                self.app_reference.setup_total_time()
+                # If the user cancels setting the total time, ignore the drop event
+                if self.app_reference.total_time is None:
+                    return
+
+            start_time, stop_time = self.show_time_input_dialog(signal_type)
+            
+            if start_time is not None and stop_time is not None:
+                # Check if the start time or stop time exceeds the total time
+                if start_time > self.app_reference.total_time or stop_time > self.app_reference.total_time:
+                    # Show a warning message with custom style
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("Time Exceeds Total Time")
+                    
+                    msg_box.setText(f"Total time is only {self.app_reference.total_time} seconds. Please don't exceed the range or reset your total time.")
+                    msg_box.setIcon(QMessageBox.Icon.Warning)
+                    
+                    # Apply the custom stylesheet
+                    msg_box.setStyleSheet("""
+                        QMessageBox { background-color: white; }
+                        QLabel { color: black; }
+                        QPushButton { 
+                            background-color: white; 
+                            color: black; 
+                            border: 1px solid black; 
+                            padding: 5px; 
+                        }
+                        QPushButton:hover { 
+                            background-color: gray; 
+                        }
+                    """)
+                    
+                    msg_box.exec()
+                    return  # Stop further processing
+
+                self.plot_signal(signal_type, start_time, stop_time)
+
+
+
+
+    def show_time_input_dialog(self, signal_type):
+        dialog = TimeInputDialog(signal_type)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            start_time = dialog.start_time_input.value()
+            stop_time = dialog.stop_time_input.value()
+            return start_time, stop_time
+        return None, None
+
+    def plot_signal(self, signal_type, start_time, stop_time):
+        signal_data = self.get_signal_data(signal_type)
+        if signal_data is not None:
+            if self.app_reference.total_time:
+                stop_time = min(stop_time, self.app_reference.total_time)  # Cap the stop time by total time
+            t = np.linspace(start_time, stop_time, len(signal_data))
+            self.axes.clear()  # Clear previous plots
+            self.axes.plot(t, signal_data, label=signal_type)
+            self.axes.legend(loc="upper right")  # Optional: Add legend
+            self.draw()
+
+
+    def get_signal_data(self, signal_type):
+        # Retrieve signal data based on signal_type
+        if signal_type in self.app_reference.custom_signals:
+            signal_data = self.app_reference.custom_signals[signal_type]["data"]
+        elif signal_type in self.app_reference.signal_templates:
+            signal_data = self.app_reference.signal_templates[signal_type]["data"]
+        elif signal_type in self.app_reference.imported_signals:
+            signal_data = self.app_reference.imported_signals[signal_type]["data"]
+        else:
+            signal_data = None
+        return signal_data
+
+    def show_time_input_dialog(self, signal_type):
+        while True:
+            dialog = TimeInputDialog(signal_type)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                start_time = dialog.start_time_input.value()
+                stop_time = dialog.stop_time_input.value()
+                if start_time >= stop_time:
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("Invalid Time Range")
+                    msg_box.setText("Start time must be smaller than stop time.")
+                    msg_box.setIcon(QMessageBox.Icon.Warning)
+                    
+                    # Set the background to black, text to white, and button style
+                    msg_box.setStyleSheet("""
+                        QMessageBox { background-color: white; }
+                        QLabel { color: black; }
+                        QPushButton { 
+                            background-color: white; 
+                            color: black; 
+                            border: 1px solid black; 
+                            padding: 5px; 
+                        }
+                        QPushButton:hover { 
+                            background-color: gray; 
+                        }
+                    """)
+                    msg_box.exec()
+                else:
+                    return start_time, stop_time
+            else:
+                return None, None
+
+
+
+class TimeInputDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Input Time Range")
+
+        layout = QVBoxLayout(self)
+        
+        signal_label = QLabel(f"Signal Type: {signal_type}")
+        layout.addWidget(signal_label)
+        
+        form_layout = QFormLayout()
+        
+        self.start_time_input = QDoubleSpinBox()
+        self.start_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Start Time (s):", self.start_time_input)
+        
+        self.stop_time_input = QDoubleSpinBox()
+        self.stop_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Stop Time (s):", self.stop_time_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
 
 
 class Haptics_App(QtWidgets.QMainWindow):
@@ -1072,6 +1125,13 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.resize(1500, 750)
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
+
+        self.ui.pushButton_5.clicked.connect(self.setup_total_time)
+        self.statusBar().showMessage("Welcome to Haptics App")
+
+        # Add a flag to track the first signal drop
+        self.first_signal_drop = True
+        self.total_time = None
 
         if os.path.exists(icon_path):
             icon.addPixmap(QtGui.QPixmap(icon_path), QIcon.Mode.Normal, QIcon.State.Off)
@@ -1111,21 +1171,11 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.selection_view.setFixedSize(100, 100)  # Set size and position as needed
         self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
 
-        # Enable scroll bars for the timeline canvas
-        self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.ui.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
         # Connect clear button to clear_plot method
         self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
         
         # Connect save button to save_current_signal method
         self.ui.pushButton_2.clicked.connect(self.save_current_signal)
-
-        # Connect save button to save_current_signal method
-        self.ui.pushButton_3.clicked.connect(self.clear_canvas_and_timeline)
-
-        # Connect "Adjust Size" button to adjust_canvas_size method
-        self.pushButton_4.clicked.connect(self.adjust_canvas_size)
 
         self.signal_counter = 1  # Counter for naming saved signals
         self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
@@ -1146,57 +1196,67 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
         self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
 
-    def clear_canvas_and_timeline(self):
-        self.actuator_canvas.clear_canvas()
-        self.clear_timeline_canvas()
-        self.reset_color_management()
 
-    def clear_timeline_canvas(self):
-        # Clear the timeline layout
-        while self.timeline_layout.count() > 0:
-            item = self.timeline_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-        self.timeline_widgets.clear()
+    def setup_total_time(self):
+            # Allow the user to set the total time
+            msg_box = QInputDialog(self)
+            msg_box.setWindowTitle("Set up total time")
+            msg_box.setLabelText("Enter total time (in seconds):")
+            msg_box.setInputMode(QInputDialog.InputMode.DoubleInput)
+            msg_box.setDoubleDecimals(2)
+            msg_box.setDoubleMinimum(0)
+            if self.total_time is not None:
+                msg_box.setDoubleValue(self.total_time)
 
-    def reset_color_management(self):
-        # Reset color management stuff
-        self.actuator_canvas.branch_colors.clear()
-        self.actuator_canvas.color_index = 0
+            # Set the custom stylesheet
+            msg_box.setStyleSheet("""
+                QInputDialog { background-color: white; }
+                QLabel { color: black; }
+                QPushButton { 
+                    background-color: white; 
+                    color: black; 
+                    border: 1px solid black; 
+                    padding: 5px; 
+                }
+                QPushButton:hover { 
+                    background-color: gray; 
+                }
+            """)
 
-    def adjust_canvas_size(self):
-        dialog = CanvasSizeDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                width = int(dialog.width_input.text())
-                height = int(dialog.height_input.text())
-                self.actuator_canvas.set_canvas_size(width, height)
-            except ValueError:
-                print("Invalid input. Please enter valid integer values for width and height.")
+            if msg_box.exec() == QDialog.DialogCode.Accepted:
+                self.total_time = msg_box.doubleValue()
+                self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
+            else:
+                self.statusBar().showMessage("Total time not set. Please set the total time using 'Set Total Time' button.")
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
-        # Create a new QWidget to represent the actuator in the timeline
-        actuator_widget = QWidget()
-        actuator_widget.setStyleSheet(f"background-color: {color};")
+        color_rgb = QColor(color).getRgbF()[:3]
+        actuator_widget = TimelineCanvas(parent=self.ui.scrollAreaWidgetContents, color=color_rgb, label=f"{actuator_type} - {new_id}", app_reference=self)
         actuator_layout = QHBoxLayout(actuator_widget)
         actuator_label = QLabel(f"{actuator_type} - {new_id}")
         actuator_layout.addWidget(actuator_label)
         
-        # Add the new actuator widget to the timeline layout
         self.timeline_layout.addWidget(actuator_widget)
-
-        # Store the reference to the timeline widget
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
 
     def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
         if old_actuator_id in self.timeline_widgets:
             actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
-            actuator_widget.setStyleSheet(f"background-color: {color};")
+            
+            # Update the canvas color
+            color_rgb = QColor(color).getRgbF()[:3]
+            actuator_widget.update_canvas(color=color_rgb, label=f"{actuator_type} - {new_actuator_id}")
+            
+            # Update the widget background color
+            actuator_widget.setStyleSheet(f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 0);")
+            
+            # Update the label
             actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
-
+            
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+
+
             
     def remove_actuator_from_timeline(self, actuator_id):
         if actuator_id in self.timeline_widgets:
