@@ -947,6 +947,105 @@ class CreateBranchDialog(QDialog):
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
+class TimelineCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
+        self.app_reference = app_reference  # Reference to Haptics_App
+        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
+        self.axes = self.fig.add_subplot(111)
+        self.axes.set_facecolor(color)
+        self.axes.set_xticks([])
+        self.axes.set_yticks([])
+        self.axes.spines['top'].set_visible(True)
+        self.axes.spines['right'].set_visible(True)
+        self.axes.spines['left'].set_visible(True)
+        self.axes.spines['bottom'].set_visible(True)
+        
+        super(TimelineCanvas, self).__init__(self.fig)
+        self.setParent(parent)
+        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.setAcceptDrops(True)
+        
+    def update_canvas(self, color, label):
+        self.fig.set_facecolor(color)
+        self.axes.set_facecolor(color)
+        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.draw()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            signal_type = event.mimeData().text()
+            start_time, stop_time = self.show_time_input_dialog(signal_type)
+            if start_time is not None and stop_time is not None:
+                self.plot_signal(signal_type, start_time, stop_time)
+
+    def show_time_input_dialog(self, signal_type):
+        dialog = TimeInputDialog(signal_type)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            start_time = dialog.start_time_input.value()
+            stop_time = dialog.stop_time_input.value()
+            return start_time, stop_time
+        return None, None
+
+    def plot_signal(self, signal_type, start_time, stop_time):
+        signal_data = self.get_signal_data(signal_type)
+        print(signal_type)
+        if signal_data is not None:
+            t = np.linspace(start_time, stop_time, len(signal_data))
+            self.axes.plot(t, signal_data)
+            self.draw()
+
+
+    def get_signal_data(self, signal_type):
+        # Retrieve signal data based on signal_type
+
+        if signal_type in self.app_reference.custom_signals:
+            print("here")
+            signal_data = self.app_reference.custom_signals[signal_type]["data"]
+        elif signal_type in self.app_reference.signal_templates:
+            print("here")
+            signal_data = self.app_reference.signal_templates[signal_type]["data"]
+        elif signal_type in self.app_reference.imported_signals:
+            print("here")
+            signal_data = self.app_reference.imported_signals[signal_type]["data"]
+        else:
+            print("here!!")
+            signal_data = None
+        
+        return signal_data
+
+class TimeInputDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Input Time Range")
+
+        layout = QVBoxLayout(self)
+        
+        signal_label = QLabel(f"Signal Type: {signal_type}")
+        layout.addWidget(signal_label)
+        
+        form_layout = QFormLayout()
+        
+        self.start_time_input = QDoubleSpinBox()
+        self.start_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Start Time (s):", self.start_time_input)
+        
+        self.stop_time_input = QDoubleSpinBox()
+        self.stop_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Stop Time (s):", self.stop_time_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -1020,27 +1119,33 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
-        # Create a new QWidget to represent the actuator in the timeline
-        actuator_widget = QWidget()
-        actuator_widget.setStyleSheet(f"background-color: {color};")
+        color_rgb = QColor(color).getRgbF()[:3]
+        actuator_widget = TimelineCanvas(parent=self.ui.scrollAreaWidgetContents, color=color_rgb, label=f"{actuator_type} - {new_id}", app_reference=self)
         actuator_layout = QHBoxLayout(actuator_widget)
         actuator_label = QLabel(f"{actuator_type} - {new_id}")
         actuator_layout.addWidget(actuator_label)
         
-        # Add the new actuator widget to the timeline layout
         self.timeline_layout.addWidget(actuator_widget)
-
-        # Store the reference to the timeline widget
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
 
     def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
         if old_actuator_id in self.timeline_widgets:
             actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
-            actuator_widget.setStyleSheet(f"background-color: {color};")
+            
+            # Update the canvas color
+            color_rgb = QColor(color).getRgbF()[:3]
+            actuator_widget.update_canvas(color=color_rgb, label=f"{actuator_type} - {new_actuator_id}")
+            
+            # Update the widget background color
+            actuator_widget.setStyleSheet(f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 0);")
+            
+            # Update the label
             actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
-
+            
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+
+
             
     def remove_actuator_from_timeline(self, actuator_id):
         if actuator_id in self.timeline_widgets:
