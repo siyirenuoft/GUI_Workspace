@@ -953,23 +953,123 @@ class TimelineCanvas(FigureCanvas):
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
         self.axes = self.fig.add_subplot(111)
         self.axes.set_facecolor(color)
-        self.axes.set_xticks([])
-        self.axes.set_yticks([])
+        
+        # Set y-axis to only show the 0 value
+        self.axes.set_yticks([0])  # Show only the 0 tick
+        self.axes.set_yticklabels(['0'])  # Label the 0 tick
         self.axes.spines['top'].set_visible(True)
         self.axes.spines['right'].set_visible(True)
-        self.axes.spines['left'].set_visible(True)
-        self.axes.spines['bottom'].set_visible(True)
+        self.axes.spines['left'].set_visible(True)  # Show left spine
+        self.axes.spines['bottom'].set_visible(True)  # Show bottom spine
         
+        # Set spine color
+        spine_color = to_rgba((240/255, 235/255, 229/255))  # Custom color for the border
+        self.axes.spines['left'].set_color(spine_color)
+        self.axes.spines['bottom'].set_color(spine_color)
+        self.axes.spines['right'].set_color(spine_color)
+        self.axes.spines['top'].set_color(spine_color)
+        
+        # Set ticks color and size
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Show y-axis tick for 0
+        self.axes.tick_params(axis='x', which='both', bottom=False, top=False)  # Hide x-axis ticks
+
         super(TimelineCanvas, self).__init__(self.fig)
         self.setParent(parent)
         self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
         self.setAcceptDrops(True)
         
+        # Set the x-axis limits to [0, total_time]
+        self.update_x_axis_limits()
+
+        self.signals = {}  # Dictionary to store signal data with time ranges
+
+    def update_x_axis_limits(self):
+        if self.app_reference.total_time is not None:
+            self.axes.set_xlim(0, self.app_reference.total_time)
+            self.draw()
+
     def update_canvas(self, color, label):
         self.fig.set_facecolor(color)
         self.axes.set_facecolor(color)
         self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.update_x_axis_limits()  # Ensure x-axis limits are updated
         self.draw()
+
+    def plot_signal(self, signal_type, start_time, stop_time):
+        signal_data = self.get_signal_data(signal_type)
+        if signal_data is not None:
+            # Check for conflicts with existing signals
+            conflict = self.check_time_conflict(start_time, stop_time)
+            if conflict:
+                # Show conflict resolution dialog
+                choice = self.show_conflict_dialog(conflict, start_time, stop_time)
+                if choice == 'Replace':
+                    # Replace the conflicting signal
+                    self.replace_signal_in_range(start_time, stop_time, signal_data)
+                elif choice == 'Reset':
+                    # Adjust the new signal's time range
+                    start_time, stop_time = self.reset_time_range(start_time, stop_time)
+                    self.add_signal_to_plot(start_time, stop_time, signal_data)
+            else:
+                self.add_signal_to_plot(start_time, stop_time, signal_data)
+
+    def check_time_conflict(self, start_time, stop_time):
+        for existing_start, existing_stop in self.signals.keys():
+            if not (stop_time <= existing_start or start_time >= existing_stop):
+                return (existing_start, existing_stop)
+        return None
+
+    def show_conflict_dialog(self, conflict, start_time, stop_time):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Time Conflict Detected")
+        msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal from {conflict[0]}s to {conflict[1]}s.")
+        msg_box.setInformativeText("Do you want to replace the conflicting signal or reset the time range of the new signal?")
+        replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
+        reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
+        msg_box.exec()
+
+        if msg_box.clickedButton() == replace_button:
+            return 'Replace'
+        else:
+            return 'Reset'
+
+    def replace_signal_in_range(self, start_time, stop_time, new_signal_data):
+        # Replace the conflicting part of the signal
+        self.remove_signal_in_range(start_time, stop_time)
+        self.add_signal_to_plot(start_time, stop_time, new_signal_data)
+
+    def reset_time_range(self, start_time, stop_time):
+        # Adjust the time range to avoid conflict
+        existing_times = sorted(self.signals.keys())
+        for existing_start, existing_stop in existing_times:
+            if start_time < existing_stop <= stop_time:
+                start_time = existing_stop
+            elif start_time <= existing_start < stop_time:
+                stop_time = existing_start
+        return start_time, stop_time
+
+    def add_signal_to_plot(self, start_time, stop_time, signal_data):
+        total_points = 500
+        t = np.linspace(0, self.app_reference.total_time, total_points)
+        y = np.zeros_like(t)
+        start_index = int((start_time / self.app_reference.total_time) * total_points)
+        stop_index = int((stop_time / self.app_reference.total_time) * total_points)
+        y[start_index:stop_index] = signal_data[:stop_index - start_index]
+
+        if len(self.signals) > 0:
+            current_y = self.axes.lines[0].get_ydata()
+            current_y[start_index:stop_index] = y[start_index:stop_index]
+            self.axes.lines[0].set_ydata(current_y)
+        else:
+            self.axes.plot(t, y)
+
+        self.signals[(start_time, stop_time)] = signal_data
+        self.draw()
+
+    def remove_signal_in_range(self, start_time, stop_time):
+        for (existing_start, existing_stop), _ in list(self.signals.items()):
+            if not (stop_time <= existing_start or start_time >= existing_stop):
+                del self.signals[(existing_start, existing_stop)]
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
@@ -978,48 +1078,48 @@ class TimelineCanvas(FigureCanvas):
             event.ignore()
 
     def dropEvent(self, event):
-        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
-            signal_type = event.mimeData().text()
+        item = event.source().selectedItems()[0]
+        signal_type = item.text(0)
 
-            # Check if total time is set
+        # Check if total time is set
+        if self.app_reference.total_time is None:
+            # If total time is not set, prompt the user to set it up
+            self.app_reference.setup_total_time()
+            # If the user cancels setting the total time, ignore the drop event
             if self.app_reference.total_time is None:
-                # If total time is not set, prompt the user to set it up
-                self.app_reference.setup_total_time()
-                # If the user cancels setting the total time, ignore the drop event
-                if self.app_reference.total_time is None:
-                    return
+                return
 
-            start_time, stop_time = self.show_time_input_dialog(signal_type)
-            
-            if start_time is not None and stop_time is not None:
-                # Check if the start time or stop time exceeds the total time
-                if start_time > self.app_reference.total_time or stop_time > self.app_reference.total_time:
-                    # Show a warning message with custom style
-                    msg_box = QMessageBox(self)
-                    msg_box.setWindowTitle("Time Exceeds Total Time")
-                    
-                    msg_box.setText(f"Total time is only {self.app_reference.total_time} seconds. Please don't exceed the range or reset your total time.")
-                    msg_box.setIcon(QMessageBox.Icon.Warning)
-                    
-                    # Apply the custom stylesheet
-                    msg_box.setStyleSheet("""
-                        QMessageBox { background-color: white; }
-                        QLabel { color: black; }
-                        QPushButton { 
-                            background-color: white; 
-                            color: black; 
-                            border: 1px solid black; 
-                            padding: 5px; 
-                        }
-                        QPushButton:hover { 
-                            background-color: gray; 
-                        }
-                    """)
-                    
-                    msg_box.exec()
-                    return  # Stop further processing
+        start_time, stop_time = self.show_time_input_dialog(signal_type)
+        
+        if start_time is not None and stop_time is not None:
+            # Check if the start time or stop time exceeds the total time
+            if start_time > self.app_reference.total_time or stop_time > self.app_reference.total_time:
+                # Show a warning message with custom style
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Time Exceeds Total Time")
+                
+                msg_box.setText(f"Total time is only {self.app_reference.total_time} seconds. Please don't exceed the range or reset your total time.")
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                
+                # Apply the custom stylesheet
+                msg_box.setStyleSheet("""
+                    QMessageBox { background-color: white; }
+                    QLabel { color: black; }
+                    QPushButton { 
+                        background-color: white; 
+                        color: black; 
+                        border: 1px solid black; 
+                        padding: 5px; 
+                    }
+                    QPushButton:hover { 
+                        background-color: gray; 
+                    }
+                """)
+                
+                msg_box.exec()
+                return  # Stop further processing
 
-                self.plot_signal(signal_type, start_time, stop_time)
+            self.plot_signal(signal_type, start_time, stop_time)
 
 
 
@@ -1031,18 +1131,6 @@ class TimelineCanvas(FigureCanvas):
             stop_time = dialog.stop_time_input.value()
             return start_time, stop_time
         return None, None
-
-    def plot_signal(self, signal_type, start_time, stop_time):
-        signal_data = self.get_signal_data(signal_type)
-        if signal_data is not None:
-            if self.app_reference.total_time:
-                stop_time = min(stop_time, self.app_reference.total_time)  # Cap the stop time by total time
-            t = np.linspace(start_time, stop_time, len(signal_data))
-            self.axes.clear()  # Clear previous plots
-            self.axes.plot(t, signal_data, label=signal_type)
-            self.axes.legend(loc="upper right")  # Optional: Add legend
-            self.draw()
-
 
     def get_signal_data(self, signal_type):
         # Retrieve signal data based on signal_type
@@ -1098,6 +1186,7 @@ class TimeInputDialog(QDialog):
         layout = QVBoxLayout(self)
         
         signal_label = QLabel(f"Signal Type: {signal_type}")
+        
         layout.addWidget(signal_label)
         
         form_layout = QFormLayout()
@@ -1198,36 +1287,40 @@ class Haptics_App(QtWidgets.QMainWindow):
 
 
     def setup_total_time(self):
-            # Allow the user to set the total time
-            msg_box = QInputDialog(self)
-            msg_box.setWindowTitle("Set up total time")
-            msg_box.setLabelText("Enter total time (in seconds):")
-            msg_box.setInputMode(QInputDialog.InputMode.DoubleInput)
-            msg_box.setDoubleDecimals(2)
-            msg_box.setDoubleMinimum(0)
-            if self.total_time is not None:
-                msg_box.setDoubleValue(self.total_time)
+        msg_box = QInputDialog(self)
+        msg_box.setWindowTitle("Set up total time")
+        msg_box.setLabelText("Enter total time (in seconds):")
+        msg_box.setInputMode(QInputDialog.InputMode.DoubleInput)
+        msg_box.setDoubleDecimals(2)
+        msg_box.setDoubleMinimum(0)
+        if self.total_time is not None:
+            msg_box.setDoubleValue(self.total_time)
 
-            # Set the custom stylesheet
-            msg_box.setStyleSheet("""
-                QInputDialog { background-color: white; }
-                QLabel { color: black; }
-                QPushButton { 
-                    background-color: white; 
-                    color: black; 
-                    border: 1px solid black; 
-                    padding: 5px; 
-                }
-                QPushButton:hover { 
-                    background-color: gray; 
-                }
-            """)
+        # Set the custom stylesheet
+        msg_box.setStyleSheet("""
+            QInputDialog { background-color: white; }
+            QLabel { color: black; }
+            QPushButton { 
+                background-color: white; 
+                color: black; 
+                border: 1px solid black; 
+                padding: 5px; 
+            }
+            QPushButton:hover { 
+                background-color: gray; 
+            }
+        """)
 
-            if msg_box.exec() == QDialog.DialogCode.Accepted:
-                self.total_time = msg_box.doubleValue()
-                self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
-            else:
-                self.statusBar().showMessage("Total time not set. Please set the total time using 'Set Total Time' button.")
+        if msg_box.exec() == QDialog.DialogCode.Accepted:
+            self.total_time = msg_box.doubleValue()
+            self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
+            self.update_all_timeline_x_axis_limits()  # Update all timeline x-axes
+        else:
+            self.statusBar().showMessage("Total time not set. Please set the total time using 'Set Total Time' button.")
+
+    def update_all_timeline_x_axis_limits(self):
+        for _, (timeline_widget, _) in self.timeline_widgets.items():
+            timeline_widget.update_x_axis_limits()
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         color_rgb = QColor(color).getRgbF()[:3]
