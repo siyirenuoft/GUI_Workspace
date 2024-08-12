@@ -998,20 +998,72 @@ class TimelineCanvas(FigureCanvas):
     def plot_signal(self, signal_type, start_time, stop_time):
         signal_data = self.get_signal_data(signal_type)
         if signal_data is not None:
-            # Check for conflicts with existing signals
-            conflict = self.check_time_conflict(start_time, stop_time)
+            # Ensure stop_time does not exceed total_time
+            stop_time = min(stop_time, self.app_reference.total_time)
+            
+            # Generate time array
+            total_points = 500
+            t = np.linspace(0, self.app_reference.total_time, total_points)
+            
+            # Create y array, setting values outside the range to 0
+            if not hasattr(self, 'y_data'):
+                self.y_data = np.zeros_like(t)  # Initialize y_data only once
+            new_y = np.zeros_like(t)
+            
+            start_index = int((start_time / self.app_reference.total_time) * total_points)
+            stop_index = int((stop_time / self.app_reference.total_time) * total_points)
+            
+            new_y[start_index:stop_index] = signal_data[:stop_index - start_index]
+
+            # Check for conflicts
+            conflict = None
+            for i in range(start_index, stop_index):
+                if self.y_data[i] != 0 and new_y[i] != 0:
+                    conflict_start = t[i]
+                    while i < stop_index and self.y_data[i] != 0 and new_y[i] != 0:
+                        i += 1
+                    conflict_stop = t[i-1]
+                    conflict = (conflict_start, conflict_stop)
+                    break
+
             if conflict:
-                # Show conflict resolution dialog
-                choice = self.show_conflict_dialog(conflict, start_time, stop_time)
-                if choice == 'Replace':
-                    # Replace the conflicting signal
-                    self.replace_signal_in_range(start_time, stop_time, signal_data)
-                elif choice == 'Reset':
-                    # Adjust the new signal's time range
-                    start_time, stop_time = self.reset_time_range(start_time, stop_time)
-                    self.add_signal_to_plot(start_time, stop_time, signal_data)
+                action = self.show_conflict_dialog(conflict, start_time, stop_time)
+                if action == 'Replace':
+                    self.y_data[start_index:stop_index] = new_y[start_index:stop_index]
+                elif action == 'Reset':
+                    # Re-trigger the time input dialog for the user to reset the time range
+                    new_start_time, new_stop_time = self.show_time_input_dialog(signal_type)
+                    if new_start_time is not None and new_stop_time is not None:
+                        self.plot_signal(signal_type, new_start_time, new_stop_time)  # Recursively call plot_signal
+                    return
+                else:
+                    return
             else:
-                self.add_signal_to_plot(start_time, stop_time, signal_data)
+                self.y_data[start_index:stop_index] = new_y[start_index:stop_index]
+            
+            self.axes.clear()  # Clear previous plots
+            self.axes.set_yticks([0])  # Show only the 0 tick
+            self.axes.set_yticklabels(['0'])  # Label the 0 tick
+            self.axes.spines['top'].set_visible(True)
+            self.axes.spines['right'].set_visible(True)
+            self.axes.spines['left'].set_visible(True)  # Show left spine
+            self.axes.spines['bottom'].set_visible(True)  # Show bottom spine
+
+            # Set spine color
+            spine_color = to_rgba((240/255, 235/255, 229/255))  # Custom color for the border
+            self.axes.spines['left'].set_color(spine_color)
+            self.axes.spines['bottom'].set_color(spine_color)
+            self.axes.spines['top'].set_color(spine_color)
+            self.axes.spines['right'].set_color(spine_color)
+            
+            # Set ticks color and size
+            self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Show y-axis tick for 0
+            self.axes.tick_params(axis='x', which='both', bottom=False, top=False)  # Hide x-axis ticks
+
+            self.axes.plot(t, self.y_data)
+            self.draw()
+
+
 
     def check_time_conflict(self, start_time, stop_time):
         for existing_start, existing_stop in self.signals.keys():
@@ -1024,6 +1076,22 @@ class TimelineCanvas(FigureCanvas):
         msg_box.setWindowTitle("Time Conflict Detected")
         msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal from {conflict[0]}s to {conflict[1]}s.")
         msg_box.setInformativeText("Do you want to replace the conflicting signal or reset the time range of the new signal?")
+        
+        # Apply the custom stylesheet
+        msg_box.setStyleSheet("""
+            QMessageBox { background-color: white; }
+            QLabel { color: black; }
+            QPushButton { 
+                background-color: white; 
+                color: black; 
+                border: 1px solid black; 
+                padding: 5px; 
+            }
+            QPushButton:hover { 
+                background-color: gray; 
+            }
+        """)
+
         replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
         reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
         msg_box.exec()
@@ -1032,6 +1100,7 @@ class TimelineCanvas(FigureCanvas):
             return 'Replace'
         else:
             return 'Reset'
+
 
     def replace_signal_in_range(self, start_time, stop_time, new_signal_data):
         # Replace the conflicting part of the signal
