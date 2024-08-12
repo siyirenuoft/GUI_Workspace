@@ -524,7 +524,7 @@ class ActuatorCanvas(QGraphicsView):
             self.scale_text = None
 
         # Add the new white rectangle
-        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.white))
+        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
         self.white_rect_item.setZValue(-999)
 
         # Add the new scale line and text
