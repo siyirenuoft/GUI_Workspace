@@ -532,7 +532,8 @@ class ActuatorCanvas(QGraphicsView):
                                             self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
                                             QPen(Qt.GlobalColor.black, 2))
         self.scale_text = self.scene.addText("100 mm")
-        self.scale_text.setPos(self.canvas_rect.left() + 50, self.canvas_rect.bottom() - 15)
+        text_rect = self.scale_text.boundingRect()
+        self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
         self.scale_line.setZValue(1000)
         self.scale_text.setZValue(1000)
 

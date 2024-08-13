@@ -26,6 +26,10 @@ from PyQt6.QtCore import Qt, pyqtSlot, QPoint
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
 from PyQt6.QtCore import pyqtSignal
 
+def to_subscript(text):
+    subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
+    return text.translate(subscript_map)
+
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -265,6 +269,13 @@ class Actuator(QGraphicsItem):
         font = painter.font()
         font.setPointSizeF(self.calculate_font_size())
         painter.setFont(font)
+
+        # Convert the ID to the desired format
+        if '.' in self.id:
+            main_id, sub_id = self.id.split('.')
+            formatted_id = main_id + to_subscript(sub_id)
+        else:
+            formatted_id = self.id  # Handle cases where ID does not contain a '.'        
         
         # Calculate text position
         rect = self.boundingRect()
@@ -274,7 +285,7 @@ class Actuator(QGraphicsItem):
                            rect.height())
         
         # Draw text
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.id)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, formatted_id)
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -499,26 +510,33 @@ class ActuatorCanvas(QGraphicsView):
 
 
     def update_canvas_visuals(self):
+        # Remove the old white rectangle if it exists
         if self.white_rect_item:
             self.scene.removeItem(self.white_rect_item)
-        
-        # Set canvas color to a custom RGB value, e.g., (240, 235, 229)
-        self.colored_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
-        self.colored_rect_item.setZValue(-999)
+            self.white_rect_item = None
 
+        # Remove the old scale line and text if they exist
         if self.scale_line:
             self.scene.removeItem(self.scale_line)
+            self.scale_line = None
         if self.scale_text:
             self.scene.removeItem(self.scale_text)
+            self.scale_text = None
 
+        # Add the new white rectangle
+        self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
+        self.white_rect_item.setZValue(-999)
+
+        # Add the new scale line and text
         self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                             self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
-                                             QPen(Qt.GlobalColor.black, 2))
+                                            self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
+                                            QPen(Qt.GlobalColor.black, 2))
         self.scale_text = self.scene.addText("100 mm")
         text_rect = self.scale_text.boundingRect()
         self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
         self.scale_line.setZValue(1000)
         self.scale_text.setZValue(1000)
+
 
     def update_scale_position(self):
         if self.scale_line and self.scale_text:
@@ -995,6 +1013,8 @@ class TimelineCanvas(FigureCanvas):
         self.update_x_axis_limits()  # Ensure x-axis limits are updated
         self.draw()
 
+    
+
     def plot_signal(self, signal_type, start_time, stop_time):
         signal_data = self.get_signal_data(signal_type)
         if signal_data is not None:
@@ -1074,7 +1094,8 @@ class TimelineCanvas(FigureCanvas):
     def show_conflict_dialog(self, conflict, start_time, stop_time):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Time Conflict Detected")
-        msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal from {conflict[0]}s to {conflict[1]}s.")
+        # msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal from {conflict[0]}s to {conflict[1]}s.")
+        msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal.")
         msg_box.setInformativeText("Do you want to replace the conflicting signal or reset the time range of the new signal?")
         
         # Apply the custom stylesheet
@@ -1244,6 +1265,35 @@ class TimelineCanvas(FigureCanvas):
                     return start_time, stop_time
             else:
                 return None, None
+    
+    def remove_data_beyond_time(self, total_time):
+        total_points = 500
+        t = np.linspace(0, self.app_reference.total_time, total_points)
+
+        # Find the index where the time exceeds the new total_time
+        cut_off_index = int((total_time / self.app_reference.total_time) * total_points)
+
+        # Set the y-data beyond this index to zero
+        if hasattr(self, 'y_data'):
+            self.y_data[cut_off_index:] = 0
+            self.axes.clear()
+            self.axes.plot(t, self.y_data)
+            self.draw()
+
+    def add_zero_signal_for_new_range(self, old_total_time, new_total_time):
+        total_points = 500
+        t = np.linspace(0, self.app_reference.total_time, total_points)
+        
+        if hasattr(self, 'y_data'):
+            start_index = int((old_total_time / self.app_reference.total_time) * total_points)
+            stop_index = int((new_total_time / self.app_reference.total_time) * total_points)
+            
+            # Extend y_data with zeros
+            self.y_data[start_index:stop_index] = 0
+            self.axes.clear()
+            self.axes.plot(t, self.y_data)
+            self.draw()
+
 
 
 
@@ -1275,6 +1325,23 @@ class TimeInputDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+class CanvasSizeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Adjust Canvas Size")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.width_input = QLineEdit()
+        self.height_input = QLineEdit()
+        form_layout.addRow("Width (mm):", self.width_input)
+        form_layout.addRow("Height (mm):", self.height_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -1329,11 +1396,21 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.selection_view.setFixedSize(100, 100)  # Set size and position as needed
         self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
 
+        # Enable scroll bars for the timeline canvas
+        self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.ui.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         # Connect clear button to clear_plot method
         self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
         
         # Connect save button to save_current_signal method
         self.ui.pushButton_2.clicked.connect(self.save_current_signal)
+
+        # Connect save button to save_current_signal method
+        self.ui.pushButton_3.clicked.connect(self.clear_canvas_and_timeline)
+
+        # Connect "Adjust Size" button to adjust_canvas_size method
+        self.pushButton_4.clicked.connect(self.adjust_canvas_size)
 
         self.signal_counter = 1  # Counter for naming saved signals
         self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
@@ -1354,7 +1431,65 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
         self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
 
+    def clear_canvas_and_timeline(self):
+        # Prompt a warning to the user
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Clear Actuator and Timeline Data")
+        msg_box.setText("Are you sure you want to clear all the actuators and corresponding timeline data?")
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        # Apply the custom stylesheet for the message box
+        msg_box.setStyleSheet("""
+            QMessageBox { background-color: white; }
+            QLabel { color: black; }
+            QPushButton { 
+                background-color: white; 
+                color: black; 
+                border: 1px solid black; 
+                padding: 5px; 
+            }
+            QPushButton:hover { 
+                background-color: gray; 
+            }
+        """)
 
+        result = msg_box.exec()
+
+        if result == QMessageBox.StandardButton.Yes:
+            # If user confirms, clear the canvas and timeline
+            self.actuator_canvas.clear_canvas()
+            self.clear_timeline_canvas()
+            self.reset_color_management()
+        else:
+            # If user cancels, do nothing
+            return
+
+
+    def clear_timeline_canvas(self):
+        # Clear the timeline layout
+        while self.timeline_layout.count() > 0:
+            item = self.timeline_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.timeline_widgets.clear()
+
+    def reset_color_management(self):
+        # Reset color management stuff
+        self.actuator_canvas.branch_colors.clear()
+        self.actuator_canvas.color_index = 0
+
+    def adjust_canvas_size(self):
+        dialog = CanvasSizeDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                width = int(dialog.width_input.text())
+                height = int(dialog.height_input.text())
+                self.actuator_canvas.set_canvas_size(width, height)
+            except ValueError:
+                print("Invalid input. Please enter valid integer values for width and height.")
+    
     def setup_total_time(self):
         msg_box = QInputDialog(self)
         msg_box.setWindowTitle("Set up total time")
@@ -1381,11 +1516,59 @@ class Haptics_App(QtWidgets.QMainWindow):
         """)
 
         if msg_box.exec() == QDialog.DialogCode.Accepted:
-            self.total_time = msg_box.doubleValue()
-            self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
+            new_total_time = msg_box.doubleValue()
+
+            if self.total_time is None:
+                # If total_time is None, simply set it to the new value without any checks
+                self.total_time = new_total_time
+            elif new_total_time < self.total_time:
+                # Warn the user about potential data loss
+                warning_box = QMessageBox(self)
+                warning_box.setWindowTitle("Warning")
+                warning_box.setText(f"The setting total time is less than the current total time ({self.total_time}s). "
+                                    "This may cause data loss. Do you still want to proceed?")
+                warning_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                warning_box.setStyleSheet("""
+                    QMessageBox { background-color: white; }
+                    QLabel { color: black; }
+                    QPushButton { 
+                        background-color: white; 
+                        color: black; 
+                        border: 1px solid black; 
+                        padding: 5px; 
+                    }
+                    QPushButton:hover { 
+                        background-color: gray; 
+                    }
+                """)
+                result = warning_box.exec()
+
+                if result == QMessageBox.StandardButton.Yes:
+                    self.total_time = new_total_time
+                    self.remove_data_beyond_total_time()
+                else:
+                    return  # Do nothing if the user clicks 'No'
+
+            elif new_total_time > self.total_time:
+                old_total_time = self.total_time
+                self.total_time = new_total_time
+                self.add_zero_signal_for_new_time_range(old_total_time)
+            else:
+                self.total_time = new_total_time
+
             self.update_all_timeline_x_axis_limits()  # Update all timeline x-axes
+            self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
         else:
-            self.statusBar().showMessage("Total time not set. Please set the total time using 'Set Total Time' button.")
+            self.statusBar().showMessage("Total time not set. Please set the total time using the 'Set Total Time' button.")
+
+    def remove_data_beyond_total_time(self):
+        for _, (timeline_widget, _) in self.timeline_widgets.items():
+            timeline_widget.remove_data_beyond_time(self.total_time)
+
+    def add_zero_signal_for_new_time_range(self, old_total_time):
+        for _, (timeline_widget, _) in self.timeline_widgets.items():
+            timeline_widget.add_zero_signal_for_new_range(old_total_time, self.total_time)
+
 
     def update_all_timeline_x_axis_limits(self):
         for _, (timeline_widget, _) in self.timeline_widgets.items():
