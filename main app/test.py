@@ -11,8 +11,6 @@ import matplotlib.ticker as ticker
 import random
 from PyQt6 import QtCore, QtWidgets, QtGui, QtMultimedia
 from PyQt6 import uic
-from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
@@ -69,6 +67,9 @@ class MplCanvas(FigureCanvas):
         self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize,
                            color=color, ha='left', va='center')
 
+    def mousePressEvent(self, event):
+        pass  # Disable mouse press event handling
+
     def plot(self, x, y):
         self.axes.clear()
         bg_color = (134/255, 150/255, 167/255)
@@ -95,16 +96,13 @@ class MplCanvas(FigureCanvas):
 
     def add_signal(self, signal_data, combine):
         new_signal = np.array(signal_data["data"])
-        # print("new",new_signal)
         if combine and self.current_signal is not None:
-            #print("current",self.current_signal)
-            # print("new",new_signal)
             self.current_signal = self.current_signal + new_signal
-            #print("combine", self.current_signal)
         else:
             self.current_signal = new_signal
-        t = np.linspace(0, 1, len(self.current_signal))
+        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 500)  # Adjust t for correct duration
         self.plot(t, self.current_signal)
+
 
     def clear_plot(self):
         self.current_signal = None
@@ -115,34 +113,307 @@ class MplCanvas(FigureCanvas):
             event.accept()
         else:
             event.ignore()
-
     def dropEvent(self, event):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
-        if signal_type in self.app_reference.imported_signals:  # Check if it's an imported signal
-            imported_signal = self.app_reference.imported_signals.get(signal_type)
-            # print(imported_signal)
-            self.add_signal(imported_signal, combine=True)
-        elif signal_type in self.app_reference.custom_signals:  # Check if it's a custom signal
-            custom_signal = self.app_reference.custom_signals.get(signal_type)
-            self.add_signal(custom_signal, combine=True)
-        elif signal_type in self.app_reference.signal_templates:  # Check if it's a provided signal template
-            template_signal = self.app_reference.signal_templates.get(signal_type)
-            self.add_signal(template_signal, combine=True)
-        else:
-            self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
+        customized_signal = None
+
+        parameters = {}  # Dictionary to store parameters
+
+        # Handle oscillators
+        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+            dialog = OscillatorDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                config = dialog.get_config()
+                parameters = config  # Store the parameters
+                customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
+                self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
+        # Handle envelopes
+        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+            dialog = EnvelopeDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                config = dialog.get_config()
+                parameters = config  # Store the parameters
+                customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
+                self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
+        # If a customized signal was created, add it to the plot
+        if customized_signal:
+            self.add_signal(customized_signal, combine=True)
 
     # def dropEvent(self, event):
     #     item = event.source().selectedItems()[0]
     #     signal_type = item.text(0)
-    #     print(f"dropEvent - signal_type: {signal_type}")
-    #     if signal_type in self.app_reference.imported_signals:
-    #         signal_data = self.app_reference.imported_signals[signal_type]
-    #         print(f"dropEvent - signal_data: {signal_data}")
-    #         self.app_reference.add_signal(signal_type, combine=True)
-    #     else:
-    #         print("dropEvent - signal not found in imported_signals")
+    #     customized_signal = None
 
+    #     # Handle oscillators
+    #     if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+    #         dialog = OscillatorDialog(signal_type, self)
+    #         if dialog.exec() == QDialog.DialogCode.Accepted:
+    #             config = dialog.get_config()
+    #             customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
+
+    #     # Handle envelopes
+    #     elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+    #         dialog = EnvelopeDialog(signal_type, self)
+    #         if dialog.exec() == QDialog.DialogCode.Accepted:
+    #             config = dialog.get_config()
+    #             customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
+
+    #     # Plot the customized signal
+    #     if customized_signal:
+    #         self.add_signal(customized_signal, combine=True)
+
+    def generate_custom_envelope_json(self, signal_type, duration, amplitude):
+        num_samples = int(duration * 500)  # Adjust the number of samples to match the duration
+        t = np.linspace(0, duration, num_samples)
+        # t = np.linspace(0, duration, 500)  # Ensure that the time vector spans the entire duration
+
+        if signal_type == "Envelope":
+            data = (amplitude * np.sin(2 * np.pi * 5 * t)).tolist()
+        elif signal_type == "Keyed Envelope":
+            data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
+        elif signal_type == "ASR":
+            data = np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
+                                [lambda t: amplitude * (t / (0.3 * duration)), amplitude]).tolist()
+        elif signal_type == "ADSR":
+            data = np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
+                                [lambda t: amplitude * (t / (0.1 * duration)),
+                                lambda t: amplitude * (1 - 5 * (t - 0.1 * duration) / duration),
+                                0.5 * amplitude,
+                                lambda t: 0.5 * amplitude - 0.25 * amplitude * (t - 0.5 * duration) / duration,
+                                0.25 * amplitude]).tolist()
+        elif signal_type == "Exponential Decay":
+            data = (amplitude * np.exp(-5 * t / duration)).tolist()  # Scale the decay based on duration
+        elif signal_type == "PolyBezier":
+            data = (amplitude * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
+        elif signal_type == "Signal Envelope":
+            data = (amplitude * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
+        else:
+            data = np.zeros_like(t).tolist()
+
+        return {
+            "value0": {
+                "gain": amplitude,
+                "bias": 0.0,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": 1.0,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": data
+        }
+
+
+    def generate_custom_oscillator_json(self, signal_type, frequency, rate):
+        t = np.linspace(0, 1, 500)
+        if signal_type == "Sine":
+            data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
+        elif signal_type == "Square":
+            data = np.sign(np.sin(2 * np.pi * frequency * t)).tolist()
+        elif signal_type == "Saw":
+            data = (2 * (t * frequency - np.floor(t * frequency + 0.5))).tolist()
+        elif signal_type == "Triangle":
+            data = (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1).tolist()
+        elif signal_type == "Chirp":
+            data = np.sin(2 * np.pi * (frequency * t + 0.5 * rate * t**2)).tolist()
+        elif signal_type == "FM":
+            data = np.sin(2 * np.pi * (frequency * t + rate * np.sin(2 * np.pi * frequency * t))).tolist()
+        elif signal_type == "PWM":
+            data = np.where(np.sin(2 * np.pi * frequency * t) >= 0, 1, -1).tolist()
+        elif signal_type == "Noise":
+            data = np.random.normal(0, 1, len(t)).tolist()
+        else:
+            data = np.zeros_like(t).tolist()  # Default for unsupported types
+
+        return {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": frequency * 2 * np.pi,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": data
+        }
+
+
+class PreviewCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=1, dpi=100, app_reference=None):
+        self.app_reference = app_reference  # Reference to Haptics_App
+        bg_color = (134/255, 150/255, 167/255)  # Same background color as MplCanvas
+        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=bg_color)
+        self.axes = self.fig.add_axes([0.1, 0.1, 0.8, 0.8])  # Use add_axes to create a single plot
+        self.axes.set_facecolor(bg_color)
+
+        # Convert RGB to rgba using matplotlib.colors.to_rgba
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+
+        # Hide x-axis and y-axis labels, ticks, and tick labels
+        self.axes.xaxis.set_visible(False)
+        self.axes.yaxis.set_visible(False)
+
+        # Set spine colors (canvas border)
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+        for spine in self.axes.spines.values():
+            spine.set_color(spine_color)
+            spine.set_linewidth(1)  # Set border width
+
+        # # Move x-axis label to the right side
+        # self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
+
+        super(PreviewCanvas, self).__init__(self.fig)
+        self.setParent(parent)
+        self.setStyleSheet("background-color: rgb(134, 150, 167); color: spine_color;")
+        self.fig.tight_layout()
+
+        # Initialize the canvas size to match layout.ui
+        # self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+
+    def plot_default_signal(self, signal_data):
+        self.axes.clear()
+
+        # Define the color for the signal line
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+
+        if signal_data is not None and "data" in signal_data:
+            t = np.linspace(0, 1, len(signal_data["data"]))
+            self.axes.plot(t, signal_data["data"], color=spine_color)  # Use spine_color for the line
+        else:
+            # Clear the plot if signal_data is None or invalid
+            self.axes.clear()
+        self.draw()
+
+    def mousePressEvent(self, event):
+        pass  # Disable mouse press event handling
+
+    def dragEnterEvent(self, event):
+        event.ignore()  # Disable drag event
+
+    def dropEvent(self, event):
+        event.ignore()  # Disable drop event
+
+class OscillatorDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+        self.frequency_input = QDoubleSpinBox()
+        self.frequency_input.setRange(0, 1000)  # Adjust range as needed
+        self.frequency_input.setValue(10)  # Default value
+        form_layout.addRow("Frequency (Hz):", self.frequency_input)
+        
+        self.rate_input = QDoubleSpinBox()
+        self.rate_input.setRange(0, 1000)  # Adjust range as needed
+        self.rate_input.setValue(1)  # Default value
+        form_layout.addRow("Rate:", self.rate_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        return {
+            "frequency": self.frequency_input.value(),
+            "rate": self.rate_input.value()
+        }
+
+class EnvelopeDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 1000)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+        self.duration_input.setDecimals(2)  # Allow up to two decimal places
+        self.duration_input.setSingleStep(0.1)  # Increment in 0.1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+
+        # Configure the amplitude input
+        self.amplitude_input = QDoubleSpinBox()
+        self.amplitude_input.setRange(-1000, 1000)  # Allow amplitude to be any value between -10 and 10
+        self.amplitude_input.setValue(1)  # Default value
+        self.amplitude_input.setDecimals(2)  # Allow up to two decimal places
+        self.amplitude_input.setSingleStep(0.1)  # Increment in 0.1 steps
+        form_layout.addRow("Amplitude:", self.amplitude_input)
+        
+        layout.addLayout(form_layout)
+        
+        # OK and Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        return {
+            "duration": self.duration_input.value(),
+            "amplitude": self.amplitude_input.value()
+        }
 
 # Define the ACTUATOR_CONFIG dictionary
 ACTUATOR_CONFIG = {
@@ -201,8 +472,6 @@ def generate_contrasting_color(existing_colors):
         if contrast:
             return new_color
 
-
-
 class Actuator(QGraphicsItem):
     properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
 
@@ -228,7 +497,7 @@ class Actuator(QGraphicsItem):
         self.max_font_size = config["max_font_size"]
 
         # Calculate initial font size
-        self.font_size = self.calculate_font_size()        
+        self.font_size = self.calculate_font_size()      
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -255,16 +524,20 @@ class Actuator(QGraphicsItem):
         return QRectF(-self.size/2, -self.size/2, self.size, self.size)
 
     def paint(self, painter, option, widget):
-        painter.setBrush(QBrush(self.color))
+        if self.isSelected():
+            painter.setBrush(QBrush(Qt.GlobalColor.yellow))  # Change the color to highlight
+        else:
+            painter.setBrush(QBrush(self.color))
+
         painter.setPen(QPen(Qt.GlobalColor.black, 1))
-        
+
         if self.actuator_type == "LRA":
             painter.drawEllipse(self.boundingRect())
         elif self.actuator_type == "VCA":
             painter.drawRect(self.boundingRect())
         else:  # "M"
             painter.drawRoundedRect(self.boundingRect(), 5, 5)
-        
+
         # Set font size
         font = painter.font()
         font.setPointSizeF(self.calculate_font_size())
@@ -275,17 +548,18 @@ class Actuator(QGraphicsItem):
             main_id, sub_id = self.id.split('.')
             formatted_id = main_id + to_subscript(sub_id)
         else:
-            formatted_id = self.id  # Handle cases where ID does not contain a '.'        
-        
+            formatted_id = self.id  # Handle cases where ID does not contain a '.'
+
         # Calculate text position
         rect = self.boundingRect()
         text_rect = QRectF(rect.left() + self.text_horizontal_offset,
-                           rect.top() + self.text_vertical_offset,
-                           rect.width(),
-                           rect.height())
-        
+                        rect.top() + self.text_vertical_offset,
+                        rect.width(),
+                        rect.height())
+
         # Draw text
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, formatted_id)
+
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -305,25 +579,39 @@ class Actuator(QGraphicsItem):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        canvas_rect = self.scene().views()[0].canvas_rect  # Get the canvas rectangle
 
-        # Get the current position and bounding rectangle of the actuator
-        new_pos = self.pos()
-        bounding_rect = self.boundingRect().translated(new_pos)
+        # Get the ActuatorCanvas view and its canvas rectangle
+        canvas = self.scene().views()[0]
+        canvas_rect = canvas.canvas_rect
 
-        # Calculate the adjusted position to keep the actuator within the canvas
-        if bounding_rect.left() < canvas_rect.left():
-            new_pos.setX(canvas_rect.left() + self.size / 2)
-        if bounding_rect.right() > canvas_rect.right():
-            new_pos.setX(canvas_rect.right() - self.size / 2)
-        if bounding_rect.top() < canvas_rect.top():
-            new_pos.setY(canvas_rect.top() + self.size / 2)
-        if bounding_rect.bottom() > canvas_rect.bottom():
-            new_pos.setY(canvas_rect.bottom() - self.size / 2)
+        # Calculate the bounding box of all selected items
+        selected_items = self.scene().selectedItems()
+        if not selected_items:
+            return
 
-        # Set the new position if it has changed
-        if new_pos != self.pos():
-            self.setPos(new_pos)
+        bounding_rect = QRectF()
+        for item in selected_items:
+            bounding_rect = bounding_rect.united(item.mapRectToScene(item.boundingRect()))
+
+        # Calculate the delta movement from the original position
+        delta = event.scenePos() - event.lastScenePos()
+
+        # Check if the bounding box after movement will be within the canvas limits
+        if bounding_rect.left() + delta.x() < canvas_rect.left():
+            delta.setX(canvas_rect.left() - bounding_rect.left())
+        if bounding_rect.right() + delta.x() > canvas_rect.right():
+            delta.setX(canvas_rect.right() - bounding_rect.right())
+        if bounding_rect.top() + delta.y() < canvas_rect.top():
+            delta.setY(canvas_rect.top() - bounding_rect.top())
+        if bounding_rect.bottom() + delta.y() > canvas_rect.bottom():
+            delta.setY(canvas_rect.bottom() - bounding_rect.bottom())
+
+        # Apply the adjusted movement to all selected items
+        for item in selected_items:
+            item.moveBy(delta.x(), delta.y())
+
+        # Trigger a redraw of all lines
+        canvas.redraw_all_lines()
 
     
     def adjust_text_position(self, vertical_offset, horizontal_offset):
@@ -418,7 +706,6 @@ class SelectionBar(QGraphicsItem):
             self.selection_icons.append(icon)
             self.scene.addItem(icon)
 
-
 class ActuatorCanvas(QGraphicsView):
     actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
     properties_changed = pyqtSignal(str, str, str, str)
@@ -452,6 +739,66 @@ class ActuatorCanvas(QGraphicsView):
         self.panning = False
         self.last_pan_point = QPointF()
         self.actuator_size = 20
+
+    def draw_arrowhead(self, line, ratio=0.55):
+        # Calculate the midpoint of the line
+        midpoint = QPointF((line.p1().x() + ratio * (line.p2().x() - line.p1().x())), 
+                            (line.p1().y() + ratio * (line.p2().y() - line.p1().y())))
+
+        # Size of the arrowhead
+        arrow_size = 5
+
+        # Create a simple triangle for the arrowhead
+        arrow_head = QPolygonF()
+        arrow_head.append(QPointF(0, 0))  # The tip of the arrow
+        arrow_head.append(QPointF(-arrow_size, arrow_size/2))
+        arrow_head.append(QPointF(-arrow_size, -arrow_size/2))
+
+        # Calculate the angle of the line
+        angle = line.angle()
+
+        # Rotate the arrowhead to match the direction of the line
+        transform = QTransform()
+        transform.translate(midpoint.x(), midpoint.y())  # Move the arrowhead to the midpoint
+        transform.rotate(-angle)  # Rotate it according to the line's angle
+
+        # Apply the transformation to the arrowhead
+        arrow_head = transform.map(arrow_head)
+
+        # Draw the arrowhead
+        arrow_item = self.scene.addPolygon(arrow_head, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.black))
+        arrow_item.setZValue(-1)  # Ensure the arrowhead is behind the actuators
+
+
+
+    def redraw_all_lines(self):
+        """Redraw all lines connecting actuators."""
+        # Remove all existing lines and arrowheads
+        for item in self.scene.items():
+            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)):
+                self.scene.removeItem(item)
+
+        # Redraw lines based on current actuator positions
+        for actuator in self.actuators:
+            if actuator.predecessor:
+                predecessor = self.get_actuator_by_id(actuator.predecessor)
+                if predecessor:
+                    line = QLineF(predecessor.pos(), actuator.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
+
+            if actuator.successor:
+                successor = self.get_actuator_by_id(actuator.successor)
+                if successor:
+                    line = QLineF(actuator.pos(), successor.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -493,17 +840,44 @@ class ActuatorCanvas(QGraphicsView):
         self.scene.addItem(actuator)
         self.actuators.append(actuator)
 
+        # Set the Z-value of the actuator higher than the lines
+        actuator.setZValue(0)
+
         # Emit signal when an actuator is added
         self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
 
-        # Update the predecessor's successor
+        # Draw an arrow connecting to the predecessor
         if predecessor:
             for act in self.actuators:
                 if act.id == predecessor:
-                    act.successor = new_id
+                    line = QLineF(act.pos(), actuator.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
+                    break
+
+        if successor:
+            for act in self.actuators:
+                if act.id == successor:
+                    line = QLineF(actuator.pos(), act.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
                     break
 
         actuator.update()
+
+
+    def get_actuator_by_id(self, actuator_id):
+        """Retrieve an actuator by its ID."""
+        for actuator in self.actuators:
+            if actuator.id == actuator_id:
+                return actuator
+        return None
 
     def is_drop_allowed(self, pos):
         return self.canvas_rect.contains(pos)
@@ -546,24 +920,19 @@ class ActuatorCanvas(QGraphicsView):
             self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
 
     def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        parent_app = self.window()  # Get the main window (Haptics_App)
-
-        # Check if the item is in the selection view's scene
-        selection_items = parent_app.selection_view.scene().items()
-        if isinstance(item, Actuator) and item in selection_items:
-            self.drag_start_pos = event.pos()
-            self.dragging_item = item
-            self.dragging_actuator = None  # Reset dragging actuator
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+            super().mousePressEvent(event)
         elif event.button() == Qt.MouseButton.MiddleButton:
             self.panning = True
             self.last_pan_point = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
-        elif event.button() == Qt.MouseButton.RightButton and isinstance(item, Actuator):
-            self.show_context_menu(item, event.pos())
+        elif event.button() == Qt.MouseButton.RightButton and isinstance(self.itemAt(event.pos()), Actuator):
+            self.show_context_menu(self.itemAt(event.pos()), event.pos())
         else:
             super().mousePressEvent(event)
+
 
 
     def mouseMoveEvent(self, event):
@@ -573,15 +942,9 @@ class ActuatorCanvas(QGraphicsView):
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             self.last_pan_point = event.pos()
             event.accept()
-        elif hasattr(self, 'dragging_item') and self.dragging_item:
-            if not hasattr(self, 'dragging_actuator') or self.dragging_actuator is None:
-                if (event.pos() - self.drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
-                    self.start_dragging_item(event)
-            else:
-                self.update_dragging_item(event)
-            event.accept()
         else:
             super().mouseMoveEvent(event)
+
 
 
     def mouseReleaseEvent(self, event):
@@ -684,7 +1047,13 @@ class ActuatorCanvas(QGraphicsView):
         if action == edit_action:
             self.edit_actuator_properties(actuator)
         elif action == delete_action:
-            self.remove_actuator(actuator)
+            selected_items = self.scene.selectedItems()
+            if selected_items:
+                for item in selected_items:
+                    if isinstance(item, Actuator):
+                        self.remove_actuator(item)
+            else:
+                self.remove_actuator(actuator)
 
 
     def edit_actuator_properties(self, actuator):
@@ -726,6 +1095,8 @@ class ActuatorCanvas(QGraphicsView):
             self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
             # print(new_id, new_type, actuator.color.name())
 
+            self.redraw_all_lines() # Trigger a redraw of all lines
+
     def update_related_actuators(self, old_id, new_id):
         for act in self.actuators:
             if act.predecessor == old_id:
@@ -735,9 +1106,31 @@ class ActuatorCanvas(QGraphicsView):
             act.update()
 
     def remove_actuator(self, actuator):
-        self.scene.removeItem(actuator)
-        self.actuators.remove(actuator)
-        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+        selected_items = self.scene.selectedItems()
+
+        if selected_items:
+            for item in selected_items:
+                if isinstance(item, Actuator):
+                    # Ensure the item is still part of the scene
+                    if item.scene() == self.scene:
+                        matching_actuators = [a for a in self.actuators if a.id == item.id]
+                        if matching_actuators:
+                            self.actuators.remove(matching_actuators[0])
+                        self.scene.removeItem(item)
+                        self.actuator_deleted.emit(item.id)  # Emit the deletion signal
+        else:
+            # Ensure the actuator is still part of the scene
+            if actuator.scene() == self.scene:
+                matching_actuators = [a for a in self.actuators if a.id == actuator.id]
+                if matching_actuators:
+                    self.actuators.remove(matching_actuators[0])
+                self.scene.removeItem(actuator)
+                self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+
+        self.redraw_all_lines()  # Trigger a redraw of all lines
+
+
+
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -796,7 +1189,6 @@ class ActuatorCanvas(QGraphicsView):
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
 
-
 class SelectionBarView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(parent)
@@ -817,7 +1209,6 @@ class SelectionBarView(QGraphicsView):
             drag.setMimeData(mime_data)
             drag.exec(Qt.DropAction.CopyAction)
         super().mousePressEvent(event)
-
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -1294,9 +1685,6 @@ class TimelineCanvas(FigureCanvas):
             self.axes.plot(t, self.y_data)
             self.draw()
 
-
-
-
 class TimeInputDialog(QDialog):
     def __init__(self, signal_type, parent=None):
         super().__init__(parent)
@@ -1377,6 +1765,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Set main background color
         self.setStyleSheet("background-color: rgb(193, 205, 215);")
         self.widget_2.setStyleSheet("background-color: rgb(193, 205, 215);")
+        self.widget_3.setStyleSheet("background-color: rgb(134, 150, 167);")
+
 
         # Initialize dictionaries to store signals
         self.custom_signals = {}  # Dictionary to store custom signals
@@ -1438,6 +1828,34 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Connect the properties_changed signal to the update_timeline_actuator slot
         self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
         self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
+
+        # Create the PreviewCanvas and add it to widget_3
+        self.preview_canvas = PreviewCanvas(self.ui.widget_3, width=5, height=0.4, dpi=100)
+        self.preview_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+
+        # Create a layout for widget_3 if not already present
+        layout = QtWidgets.QVBoxLayout(self.ui.widget_3)
+        layout.setContentsMargins(0, 0, 0, 0)  # Remove any margins
+        layout.setSpacing(0)  # Remove spacing between the canvas and the widget edges
+
+        # Add the PreviewCanvas to widget_3's layout
+        layout.addWidget(self.preview_canvas)
+
+        # Create a layout for widget_3 if not already present
+        self.ui.widget_3.setLayout(QtWidgets.QVBoxLayout())
+        
+        # Add the PreviewCanvas to widget_3's layout
+        self.ui.widget_3.layout().addWidget(self.preview_canvas)
+
+        # Ensure the tree widget itemClicked event is connected to update the preview
+        self.ui.treeWidget.itemClicked.connect(self.on_tree_item_clicked)
+    
+    def update_status_bar(self, signal_type, parameters):
+        # Format the parameters into a readable string
+        param_str = ', '.join([f'{key}: {value}' for key, value in parameters.items()])
+        # Display the signal type and parameters in the status bar
+        self.statusBar().showMessage(f"Current Signal: {signal_type} | Parameters: {param_str}")
+
 
     def clear_canvas_and_timeline(self):
         # Prompt a warning to the user
@@ -1767,21 +2185,25 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_clicked(self, item, column):
+        if item is None or not isinstance(item, QTreeWidgetItem):
+            return  # Exit if the clicked item is None or not a valid item
+        
         signal_type = item.text(column)
         if signal_type in self.custom_signals:  # Check if it's a custom signal
             custom_signal = self.custom_signals.get(signal_type)
             if custom_signal is not None:
-                self.maincanvas.add_signal(custom_signal, combine=False)
+                self.preview_canvas.plot_default_signal(custom_signal)
         elif signal_type in self.signal_templates:  # Check if it's a provided signal template
             template_signal = self.signal_templates.get(signal_type)
             if template_signal is not None:
-                self.maincanvas.add_signal(template_signal, combine=False)
+                self.preview_canvas.plot_default_signal(template_signal)
         elif signal_type in self.imported_signals:  # Check if it's an imported signal
             imported_signal = self.imported_signals.get(signal_type)
             if imported_signal is not None:
-                self.maincanvas.add_signal(imported_signal, combine=False)
+                self.preview_canvas.plot_default_signal(imported_signal)
         else:
-            self.add_signal(signal_type, combine=False)  # Show the signal itself when clicked
+            self.preview_canvas.plot_default_signal(None)  # Clear the preview canvas if no valid signal is found
+
 
     def generate_signal(self, signal_type):
         base_signal = {
