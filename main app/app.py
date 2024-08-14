@@ -11,8 +11,6 @@ import matplotlib.ticker as ticker
 import random
 from PyQt6 import QtCore, QtWidgets, QtGui, QtMultimedia
 from PyQt6 import uic
-from PyQt6.QtCore import pyqtSlot
-from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
@@ -228,7 +226,7 @@ class Actuator(QGraphicsItem):
         self.max_font_size = config["max_font_size"]
 
         # Calculate initial font size
-        self.font_size = self.calculate_font_size()        
+        self.font_size = self.calculate_font_size()      
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -255,16 +253,20 @@ class Actuator(QGraphicsItem):
         return QRectF(-self.size/2, -self.size/2, self.size, self.size)
 
     def paint(self, painter, option, widget):
-        painter.setBrush(QBrush(self.color))
+        if self.isSelected():
+            painter.setBrush(QBrush(Qt.GlobalColor.yellow))  # Change the color to highlight
+        else:
+            painter.setBrush(QBrush(self.color))
+
         painter.setPen(QPen(Qt.GlobalColor.black, 1))
-        
+
         if self.actuator_type == "LRA":
             painter.drawEllipse(self.boundingRect())
         elif self.actuator_type == "VCA":
             painter.drawRect(self.boundingRect())
         else:  # "M"
             painter.drawRoundedRect(self.boundingRect(), 5, 5)
-        
+
         # Set font size
         font = painter.font()
         font.setPointSizeF(self.calculate_font_size())
@@ -275,17 +277,18 @@ class Actuator(QGraphicsItem):
             main_id, sub_id = self.id.split('.')
             formatted_id = main_id + to_subscript(sub_id)
         else:
-            formatted_id = self.id  # Handle cases where ID does not contain a '.'        
-        
+            formatted_id = self.id  # Handle cases where ID does not contain a '.'
+
         # Calculate text position
         rect = self.boundingRect()
         text_rect = QRectF(rect.left() + self.text_horizontal_offset,
-                           rect.top() + self.text_vertical_offset,
-                           rect.width(),
-                           rect.height())
-        
+                        rect.top() + self.text_vertical_offset,
+                        rect.width(),
+                        rect.height())
+
         # Draw text
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, formatted_id)
+
 
     def hoverEnterEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -305,25 +308,39 @@ class Actuator(QGraphicsItem):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        canvas_rect = self.scene().views()[0].canvas_rect  # Get the canvas rectangle
 
-        # Get the current position and bounding rectangle of the actuator
-        new_pos = self.pos()
-        bounding_rect = self.boundingRect().translated(new_pos)
+        # Get the ActuatorCanvas view and its canvas rectangle
+        canvas = self.scene().views()[0]
+        canvas_rect = canvas.canvas_rect
 
-        # Calculate the adjusted position to keep the actuator within the canvas
-        if bounding_rect.left() < canvas_rect.left():
-            new_pos.setX(canvas_rect.left() + self.size / 2)
-        if bounding_rect.right() > canvas_rect.right():
-            new_pos.setX(canvas_rect.right() - self.size / 2)
-        if bounding_rect.top() < canvas_rect.top():
-            new_pos.setY(canvas_rect.top() + self.size / 2)
-        if bounding_rect.bottom() > canvas_rect.bottom():
-            new_pos.setY(canvas_rect.bottom() - self.size / 2)
+        # Calculate the bounding box of all selected items
+        selected_items = self.scene().selectedItems()
+        if not selected_items:
+            return
 
-        # Set the new position if it has changed
-        if new_pos != self.pos():
-            self.setPos(new_pos)
+        bounding_rect = QRectF()
+        for item in selected_items:
+            bounding_rect = bounding_rect.united(item.mapRectToScene(item.boundingRect()))
+
+        # Calculate the delta movement from the original position
+        delta = event.scenePos() - event.lastScenePos()
+
+        # Check if the bounding box after movement will be within the canvas limits
+        if bounding_rect.left() + delta.x() < canvas_rect.left():
+            delta.setX(canvas_rect.left() - bounding_rect.left())
+        if bounding_rect.right() + delta.x() > canvas_rect.right():
+            delta.setX(canvas_rect.right() - bounding_rect.right())
+        if bounding_rect.top() + delta.y() < canvas_rect.top():
+            delta.setY(canvas_rect.top() - bounding_rect.top())
+        if bounding_rect.bottom() + delta.y() > canvas_rect.bottom():
+            delta.setY(canvas_rect.bottom() - bounding_rect.bottom())
+
+        # Apply the adjusted movement to all selected items
+        for item in selected_items:
+            item.moveBy(delta.x(), delta.y())
+
+        # Trigger a redraw of all lines
+        canvas.redraw_all_lines()
 
     
     def adjust_text_position(self, vertical_offset, horizontal_offset):
@@ -453,6 +470,66 @@ class ActuatorCanvas(QGraphicsView):
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
+    def draw_arrowhead(self, line, ratio=0.55):
+        # Calculate the midpoint of the line
+        midpoint = QPointF((line.p1().x() + ratio * (line.p2().x() - line.p1().x())), 
+                            (line.p1().y() + ratio * (line.p2().y() - line.p1().y())))
+
+        # Size of the arrowhead
+        arrow_size = 5
+
+        # Create a simple triangle for the arrowhead
+        arrow_head = QPolygonF()
+        arrow_head.append(QPointF(0, 0))  # The tip of the arrow
+        arrow_head.append(QPointF(-arrow_size, arrow_size/2))
+        arrow_head.append(QPointF(-arrow_size, -arrow_size/2))
+
+        # Calculate the angle of the line
+        angle = line.angle()
+
+        # Rotate the arrowhead to match the direction of the line
+        transform = QTransform()
+        transform.translate(midpoint.x(), midpoint.y())  # Move the arrowhead to the midpoint
+        transform.rotate(-angle)  # Rotate it according to the line's angle
+
+        # Apply the transformation to the arrowhead
+        arrow_head = transform.map(arrow_head)
+
+        # Draw the arrowhead
+        arrow_item = self.scene.addPolygon(arrow_head, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.black))
+        arrow_item.setZValue(-1)  # Ensure the arrowhead is behind the actuators
+
+
+
+    def redraw_all_lines(self):
+        """Redraw all lines connecting actuators."""
+        # Remove all existing lines and arrowheads
+        for item in self.scene.items():
+            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)):
+                self.scene.removeItem(item)
+
+        # Redraw lines based on current actuator positions
+        for actuator in self.actuators:
+            if actuator.predecessor:
+                predecessor = self.get_actuator_by_id(actuator.predecessor)
+                if predecessor:
+                    line = QLineF(predecessor.pos(), actuator.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
+
+            if actuator.successor:
+                successor = self.get_actuator_by_id(actuator.successor)
+                if successor:
+                    line = QLineF(actuator.pos(), successor.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
             event.acceptProposedAction()
@@ -493,17 +570,44 @@ class ActuatorCanvas(QGraphicsView):
         self.scene.addItem(actuator)
         self.actuators.append(actuator)
 
+        # Set the Z-value of the actuator higher than the lines
+        actuator.setZValue(0)
+
         # Emit signal when an actuator is added
         self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
 
-        # Update the predecessor's successor
+        # Draw an arrow connecting to the predecessor
         if predecessor:
             for act in self.actuators:
                 if act.id == predecessor:
-                    act.successor = new_id
+                    line = QLineF(act.pos(), actuator.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
+                    break
+
+        if successor:
+            for act in self.actuators:
+                if act.id == successor:
+                    line = QLineF(actuator.pos(), act.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+
+                    # Draw the arrowhead
+                    self.draw_arrowhead(line)
                     break
 
         actuator.update()
+
+
+    def get_actuator_by_id(self, actuator_id):
+        """Retrieve an actuator by its ID."""
+        for actuator in self.actuators:
+            if actuator.id == actuator_id:
+                return actuator
+        return None
 
     def is_drop_allowed(self, pos):
         return self.canvas_rect.contains(pos)
@@ -546,24 +650,19 @@ class ActuatorCanvas(QGraphicsView):
             self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
 
     def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        parent_app = self.window()  # Get the main window (Haptics_App)
-
-        # Check if the item is in the selection view's scene
-        selection_items = parent_app.selection_view.scene().items()
-        if isinstance(item, Actuator) and item in selection_items:
-            self.drag_start_pos = event.pos()
-            self.dragging_item = item
-            self.dragging_actuator = None  # Reset dragging actuator
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+            super().mousePressEvent(event)
         elif event.button() == Qt.MouseButton.MiddleButton:
             self.panning = True
             self.last_pan_point = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
-        elif event.button() == Qt.MouseButton.RightButton and isinstance(item, Actuator):
-            self.show_context_menu(item, event.pos())
+        elif event.button() == Qt.MouseButton.RightButton and isinstance(self.itemAt(event.pos()), Actuator):
+            self.show_context_menu(self.itemAt(event.pos()), event.pos())
         else:
             super().mousePressEvent(event)
+
 
 
     def mouseMoveEvent(self, event):
@@ -573,15 +672,9 @@ class ActuatorCanvas(QGraphicsView):
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
             self.last_pan_point = event.pos()
             event.accept()
-        elif hasattr(self, 'dragging_item') and self.dragging_item:
-            if not hasattr(self, 'dragging_actuator') or self.dragging_actuator is None:
-                if (event.pos() - self.drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
-                    self.start_dragging_item(event)
-            else:
-                self.update_dragging_item(event)
-            event.accept()
         else:
             super().mouseMoveEvent(event)
+
 
 
     def mouseReleaseEvent(self, event):
@@ -684,7 +777,13 @@ class ActuatorCanvas(QGraphicsView):
         if action == edit_action:
             self.edit_actuator_properties(actuator)
         elif action == delete_action:
-            self.remove_actuator(actuator)
+            selected_items = self.scene.selectedItems()
+            if selected_items:
+                for item in selected_items:
+                    if isinstance(item, Actuator):
+                        self.remove_actuator(item)
+            else:
+                self.remove_actuator(actuator)
 
 
     def edit_actuator_properties(self, actuator):
@@ -726,6 +825,8 @@ class ActuatorCanvas(QGraphicsView):
             self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
             # print(new_id, new_type, actuator.color.name())
 
+            self.redraw_all_lines() # Trigger a redraw of all lines
+
     def update_related_actuators(self, old_id, new_id):
         for act in self.actuators:
             if act.predecessor == old_id:
@@ -735,9 +836,31 @@ class ActuatorCanvas(QGraphicsView):
             act.update()
 
     def remove_actuator(self, actuator):
-        self.scene.removeItem(actuator)
-        self.actuators.remove(actuator)
-        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+        selected_items = self.scene.selectedItems()
+
+        if selected_items:
+            for item in selected_items:
+                if isinstance(item, Actuator):
+                    # Ensure the item is still part of the scene
+                    if item.scene() == self.scene:
+                        matching_actuators = [a for a in self.actuators if a.id == item.id]
+                        if matching_actuators:
+                            self.actuators.remove(matching_actuators[0])
+                        self.scene.removeItem(item)
+                        self.actuator_deleted.emit(item.id)  # Emit the deletion signal
+        else:
+            # Ensure the actuator is still part of the scene
+            if actuator.scene() == self.scene:
+                matching_actuators = [a for a in self.actuators if a.id == actuator.id]
+                if matching_actuators:
+                    self.actuators.remove(matching_actuators[0])
+                self.scene.removeItem(actuator)
+                self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+
+        self.redraw_all_lines()  # Trigger a redraw of all lines
+
+
+
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
