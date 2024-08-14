@@ -96,10 +96,23 @@ class MplCanvas(FigureCanvas):
 
     def add_signal(self, signal_data, combine):
         new_signal = np.array(signal_data["data"])
-        if combine and self.current_signal is not None:
-            self.current_signal = self.current_signal + new_signal
-        else:
+        
+        if self.current_signal is None:
             self.current_signal = new_signal
+        else:
+            # If signals have different lengths, repeat the shorter one to match the longer one
+            if len(self.current_signal) > len(new_signal):
+                repeat_factor = len(self.current_signal) // len(new_signal) + 1
+                new_signal = np.tile(new_signal, repeat_factor)[:len(self.current_signal)]
+            elif len(self.current_signal) < len(new_signal):
+                repeat_factor = len(new_signal) // len(self.current_signal) + 1
+                self.current_signal = np.tile(self.current_signal, repeat_factor)[:len(new_signal)]
+            
+            if combine:
+                self.current_signal = self.current_signal + new_signal
+            else:
+                self.current_signal = new_signal
+
         t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 500)  # Adjust t for correct duration
         self.plot(t, self.current_signal)
 
@@ -113,57 +126,39 @@ class MplCanvas(FigureCanvas):
             event.accept()
         else:
             event.ignore()
+
     def dropEvent(self, event):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
-        customized_signal = None
 
-        parameters = {}  # Dictionary to store parameters
-
-        # Handle oscillators
-        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
-            dialog = OscillatorDialog(signal_type, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                config = dialog.get_config()
-                parameters = config  # Store the parameters
-                customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
-                self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
-
-        # Handle envelopes
-        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
-            dialog = EnvelopeDialog(signal_type, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                config = dialog.get_config()
-                parameters = config  # Store the parameters
-                customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
-                self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
-
-        # If a customized signal was created, add it to the plot
-        if customized_signal:
+        # Determine if the dropped signal is imported
+        if signal_type in self.app_reference.imported_signals:
+            customized_signal = self.app_reference.imported_signals[signal_type]
             self.add_signal(customized_signal, combine=True)
+        else:
+            parameters = {}  # Dictionary to store parameters
 
-    # def dropEvent(self, event):
-    #     item = event.source().selectedItems()[0]
-    #     signal_type = item.text(0)
-    #     customized_signal = None
+            # Handle oscillators
+            if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+                dialog = OscillatorDialog(signal_type, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    config = dialog.get_config()
+                    parameters = config  # Store the parameters
+                    customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
+                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-    #     # Handle oscillators
-    #     if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
-    #         dialog = OscillatorDialog(signal_type, self)
-    #         if dialog.exec() == QDialog.DialogCode.Accepted:
-    #             config = dialog.get_config()
-    #             customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
+            # Handle envelopes
+            elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+                dialog = EnvelopeDialog(signal_type, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    config = dialog.get_config()
+                    parameters = config  # Store the parameters
+                    customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
+                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-    #     # Handle envelopes
-    #     elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
-    #         dialog = EnvelopeDialog(signal_type, self)
-    #         if dialog.exec() == QDialog.DialogCode.Accepted:
-    #             config = dialog.get_config()
-    #             customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
-
-    #     # Plot the customized signal
-    #     if customized_signal:
-    #         self.add_signal(customized_signal, combine=True)
+            # If a customized signal was created, add it to the plot
+            if customized_signal:
+                self.add_signal(customized_signal, combine=True)
 
     def generate_custom_envelope_json(self, signal_type, duration, amplitude):
         num_samples = int(duration * 500)  # Adjust the number of samples to match the duration
