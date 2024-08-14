@@ -1346,7 +1346,15 @@ class CanvasSizeDialog(QDialog):
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.ui = uic.loadUi('layout.ui', self)
+        # Get the absolute path to the current script
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Construct the absolute path to the layout.ui file
+        ui_file_path = os.path.join(current_dir, 'layout.ui')
+
+        # Load the UI file
+        self.ui = uic.loadUi(ui_file_path, self)
+ 
         self.resize(1500, 750)
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
