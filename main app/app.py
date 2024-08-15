@@ -467,9 +467,18 @@ def generate_contrasting_color(existing_colors):
         if contrast:
             return new_color
 
-class Actuator(QGraphicsItem):
+class ActuatorSignalHandler(QObject):
+    clicked = pyqtSignal(str)  # Signal to indicate actuator is clicked
     properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
 
+
+    def __init__(self, actuator_id, parent=None):
+        super().__init__(parent)
+        self.actuator_id = actuator_id
+
+
+class Actuator(QGraphicsItem):
+    # properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
     def __init__(self, x, y, size, color, actuator_type, id, predecessor=None, successor=None):
         super().__init__()
         self.setPos(x, y)
@@ -483,6 +492,9 @@ class Actuator(QGraphicsItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
 
+        # Create a signal handler for this actuator
+        self.signal_handler = ActuatorSignalHandler(self.id)
+
         # Apply configuration
         config = ACTUATOR_CONFIG.get(self.actuator_type, ACTUATOR_CONFIG["LRA"])
         self.text_vertical_offset = config["text_vertical_offset"]
@@ -492,7 +504,7 @@ class Actuator(QGraphicsItem):
         self.max_font_size = config["max_font_size"]
 
         # Calculate initial font size
-        self.font_size = self.calculate_font_size()      
+        self.font_size = self.calculate_font_size()   
 
     def calculate_font_size(self):
         base_size = self.size / 2 * self.font_size_factor
@@ -565,7 +577,9 @@ class Actuator(QGraphicsItem):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.signal_handler.clicked.emit(self.id)  # Emit the signal with the actuator's ID
         super().mousePressEvent(event)
+
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -624,7 +638,7 @@ class Actuator(QGraphicsItem):
         self.actuator_type = actuator_type
         self.color = color
         self.update()
-        self.properties_changed.emit(self.id, self.actuator_type, self.color.name())
+        self.signal_handler.properties_changed.emit(self.id, self.actuator_type, self.color.name())
 
 class ActuatorPropertiesDialog(QDialog):
     def __init__(self, actuator, parent=None):
@@ -705,9 +719,12 @@ class ActuatorCanvas(QGraphicsView):
     actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
     properties_changed = pyqtSignal(str, str, str, str)
     actuator_deleted = pyqtSignal(str)  # Signal to indicate an actuator is deleted
+    no_actuator_selected = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_reference=None):
         super().__init__(parent)
+        self.haptics_app = app_reference  # Store the reference to the Haptics_App instance
+
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setRenderHints(QPainter.RenderHint.Antialiasing)
@@ -927,6 +944,17 @@ class ActuatorCanvas(QGraphicsView):
             self.show_context_menu(self.itemAt(event.pos()), event.pos())
         else:
             super().mousePressEvent(event)
+    
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if isinstance(item, Actuator):
+            if event.button() == Qt.MouseButton.RightButton:  # Detect right-click
+                self.show_context_menu(item, event.pos())
+            else:
+                super().mousePressEvent(event)
+        else:
+            self.no_actuator_selected.emit()  # Emit the signal when no actuator is selected
+            super().mousePressEvent(event)
 
 
 
@@ -1088,9 +1116,12 @@ class ActuatorCanvas(QGraphicsView):
             self.update_related_actuators(old_id, new_id)
 
             self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
-            # print(new_id, new_type, actuator.color.name())
+
+            # Update plotter immediately
+            self.haptics_app.update_timeline_actuator(old_id, new_id, new_type, actuator.color.name())
 
             self.redraw_all_lines() # Trigger a redraw of all lines
+
 
     def update_related_actuators(self, old_id, new_id):
         for act in self.actuators:
@@ -1113,6 +1144,8 @@ class ActuatorCanvas(QGraphicsView):
                             self.actuators.remove(matching_actuators[0])
                         self.scene.removeItem(item)
                         self.actuator_deleted.emit(item.id)  # Emit the deletion signal
+                        # Remove from plotter immediately
+                        self.haptics_app.remove_actuator_from_timeline(item.id)
         else:
             # Ensure the actuator is still part of the scene
             if actuator.scene() == self.scene:
@@ -1121,6 +1154,8 @@ class ActuatorCanvas(QGraphicsView):
                     self.actuators.remove(matching_actuators[0])
                 self.scene.removeItem(actuator)
                 self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+                # Remove from plotter immediately
+                self.haptics_app.remove_actuator_from_timeline(actuator.id)
 
         self.redraw_all_lines()  # Trigger a redraw of all lines
 
@@ -1352,15 +1387,17 @@ class CreateBranchDialog(QDialog):
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
 class TimelineCanvas(FigureCanvas):
+
     def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
-        self.axes = self.fig.add_subplot(111)
+        # self.axes = self.fig.add_subplot(111)
+        self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(color)
+
         
         # Set y-axis to only show the 0 value
-        self.axes.set_yticks([0])  # Show only the 0 tick
-        self.axes.set_yticklabels(['0'])  # Label the 0 tick
+    
         self.axes.spines['top'].set_visible(True)
         self.axes.spines['right'].set_visible(True)
         self.axes.spines['left'].set_visible(True)  # Show left spine
@@ -1368,14 +1405,18 @@ class TimelineCanvas(FigureCanvas):
         
         # Set spine color
         spine_color = to_rgba((240/255, 235/255, 229/255))  # Custom color for the border
-        self.axes.spines['left'].set_color(spine_color)
+
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.spines['bottom'].set_color(spine_color)
-        self.axes.spines['right'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
-        
-        # Set ticks color and size
-        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Show y-axis tick for 0
-        self.axes.tick_params(axis='x', which='both', bottom=False, top=False)  # Hide x-axis ticks
+        self.axes.spines['right'].set_color(spine_color)
+        self.axes.spines['left'].set_color(spine_color)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
+
+        # Move x-axis label to the right side
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
+
 
         super(TimelineCanvas, self).__init__(self.fig)
         self.setParent(parent)
@@ -1386,6 +1427,11 @@ class TimelineCanvas(FigureCanvas):
         self.update_x_axis_limits()
 
         self.signals = {}  # Dictionary to store signal data with time ranges
+
+    def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
+        self.axes.set_xlabel('')  # Remove default xlabel
+        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize,
+                           color=color, ha='left', va='center')
 
     def update_x_axis_limits(self):
         if self.app_reference.total_time is not None:
@@ -1448,8 +1494,8 @@ class TimelineCanvas(FigureCanvas):
                 self.y_data[start_index:stop_index] = new_y[start_index:stop_index]
             
             self.axes.clear()  # Clear previous plots
-            self.axes.set_yticks([0])  # Show only the 0 tick
-            self.axes.set_yticklabels(['0'])  # Label the 0 tick
+
+
             self.axes.spines['top'].set_visible(True)
             self.axes.spines['right'].set_visible(True)
             self.axes.spines['left'].set_visible(True)  # Show left spine
@@ -1462,11 +1508,20 @@ class TimelineCanvas(FigureCanvas):
             self.axes.spines['top'].set_color(spine_color)
             self.axes.spines['right'].set_color(spine_color)
             
-            # Set ticks color and size
-            self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Show y-axis tick for 0
-            self.axes.tick_params(axis='x', which='both', bottom=False, top=False)  # Hide x-axis ticks
+            # Set x and y labels
+            self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
+            self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
+            
+            self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
+            self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
+            
 
-            self.axes.plot(t, self.y_data)
+            self.axes.plot(t, self.y_data, color=spine_color)
+
+     
+            self.axes.set_xlim(0, self.app_reference.total_time if self.app_reference.total_time else 10)  # Example: use total_time or default
+            # self.axes.set_ylim(-1, 1)  # Example: setting y-axis range
+
             self.draw()
 
 
@@ -1776,7 +1831,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
 
         # Add ActuatorCanvas to the layout with a fixed height
-        self.actuator_canvas = ActuatorCanvas(self.ui.widget_2)
+        self.actuator_canvas = ActuatorCanvas(self.ui.widget_2,app_reference=self)
         self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
         self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
 
@@ -1844,7 +1899,70 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Ensure the tree widget itemClicked event is connected to update the preview
         self.ui.treeWidget.itemClicked.connect(self.on_tree_item_clicked)
-    
+
+        self.current_actuator = None  # Attribute to track the current actuator
+
+        self.actuator_canvas.actuator_added.connect(self.connect_actuator_signals)
+
+        # Connect the no_actuator_selected signal to the switch_to_main_canvas slot
+        self.actuator_canvas.no_actuator_selected.connect(self.switch_to_main_canvas)
+
+
+    def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
+        actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+        if actuator:
+            actuator.signal_handler.clicked.connect(self.on_actuator_clicked)
+            actuator.signal_handler.properties_changed.connect(self.update_plotter)
+
+
+    def on_actuator_clicked(self, actuator_id):
+        # When an actuator is clicked, switch to the TimelineCanvas
+        if self.current_actuator != actuator_id:
+            self.current_actuator = actuator_id
+            self.switch_to_timeline_canvas(actuator_id)
+            # Retrieve the actuator's type and color
+            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+            if actuator:
+                # Immediately update the plotter to reflect the clicked actuator
+                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
+
+
+    def update_plotter(self, actuator_id, actuator_type, color):
+        if self.current_actuator == actuator_id:
+            self.switch_to_timeline_canvas(actuator_id)  # Update the plotter to reflect changes
+
+
+    def switch_to_timeline_canvas(self, actuator_id):
+        # Clear the current layout
+        self.ui.gridLayout.removeWidget(self.maincanvas)
+        self.maincanvas.setParent(None)  # Detach MplCanvas from its parent
+
+        # Create and add the TimelineCanvas
+        color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
+        self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
+        self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
+
+    def switch_to_main_canvas(self):
+        # Check if already on MplCanvas, no need to switch if it is
+        if self.ui.gridLayout.indexOf(self.maincanvas) != -1:
+            return
+
+        # Remove the current widget (TimelineCanvas)
+        if hasattr(self, 'timeline_canvas'):
+            self.ui.gridLayout.removeWidget(self.timeline_canvas)
+            self.timeline_canvas.setParent(None)
+
+        # Add the MplCanvas back to the layout
+        self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
+        self.current_actuator = None  # Reset current actuator tracking
+
+    def mousePressEvent(self, event):
+        # If clicked on blank space, switch back to MplCanvas
+        if self.current_actuator and not self.actuator_canvas.itemAt(event.pos()):
+            self.current_actuator = None
+            self.switch_to_main_canvas()
+        super().mousePressEvent(event)
+
     def update_status_bar(self, signal_type, parameters):
         # Format the parameters into a readable string
         param_str = ', '.join([f'{key}: {value}' for key, value in parameters.items()])
@@ -1998,12 +2116,22 @@ class Haptics_App(QtWidgets.QMainWindow):
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         color_rgb = QColor(color).getRgbF()[:3]
         actuator_widget = TimelineCanvas(parent=self.ui.scrollAreaWidgetContents, color=color_rgb, label=f"{actuator_type} - {new_id}", app_reference=self)
+        
+        # Ensure the same x and y axis labels are used across all timeline widgets
+        actuator_widget.axes.set_xlabel("Time (s)", fontsize=9.5)
+        actuator_widget.axes.set_ylabel("Amplitude", fontsize=9.5)
+        
+        # Optionally, set the x-axis limits if required
+        actuator_widget.axes.set_xlim(0, self.total_time if self.total_time else 10)  # Example: total_time or default to 10 seconds
+        actuator_widget.axes.set_ylim(-1, 1)  # Example: setting y-axis range
+        
         actuator_layout = QHBoxLayout(actuator_widget)
         actuator_label = QLabel(f"{actuator_type} - {new_id}")
         actuator_layout.addWidget(actuator_label)
         
         self.timeline_layout.addWidget(actuator_widget)
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
+
 
     def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
         if old_actuator_id in self.timeline_widgets:
@@ -2021,6 +2149,9 @@ class Haptics_App(QtWidgets.QMainWindow):
             
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+
+            # Immediately update the plotter to reflect the changes
+            self.update_plotter(new_actuator_id, actuator_type, color)
 
 
             
