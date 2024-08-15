@@ -520,7 +520,8 @@ class Actuator(QGraphicsItem):
             (QColor(0, 0, 255), "Blue"),
             (QColor(255, 255, 0), "Yellow"),
             (QColor(255, 0, 255), "Magenta"),
-            (QColor(0, 255, 255), "Cyan")
+            (QColor(0, 255, 255), "Cyan"),
+            (QColor(225,127,147), "bbPink")
         ]
         for qcolor, name in colors:
             if qcolor == color:
@@ -531,19 +532,30 @@ class Actuator(QGraphicsItem):
         return QRectF(-self.size/2, -self.size/2, self.size, self.size)
 
     def paint(self, painter, option, widget):
-        if self.isSelected():
-            painter.setBrush(QBrush(Qt.GlobalColor.yellow))  # Change the color to highlight
-        else:
-            painter.setBrush(QBrush(self.color))
-
+        # Clear any previous drawing to avoid overlap
+        painter.setBrush(QBrush(self.color))
         painter.setPen(QPen(Qt.GlobalColor.black, 1))
 
+        # Draw the actuator shape based on its type (without the highlight)
         if self.actuator_type == "LRA":
             painter.drawEllipse(self.boundingRect())
         elif self.actuator_type == "VCA":
             painter.drawRect(self.boundingRect())
         else:  # "M"
             painter.drawRoundedRect(self.boundingRect(), 5, 5)
+
+        # Now, only draw the highlight rim if the item is selected
+        if self.isSelected():
+            highlight_pen = QPen(QColor(225, 20, 146), 3)  # Thicker rim for highlighting
+            painter.setPen(highlight_pen)
+            
+            # Draw the highlight rim (slightly larger than the original shape)
+            if self.actuator_type == "LRA":
+                painter.drawEllipse(self.boundingRect().adjusted(-2, -2, 2, 2))  # Slightly larger for the rim
+            elif self.actuator_type == "VCA":
+                painter.drawRect(self.boundingRect().adjusted(-2, -2, 2, 2))
+            else:  # "M"
+                painter.drawRoundedRect(self.boundingRect().adjusted(-2, -2, 2, 2), 5, 5)
 
         # Set font size
         font = painter.font()
@@ -579,7 +591,7 @@ class Actuator(QGraphicsItem):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.signal_handler.clicked.emit(self.id)  # Emit the signal with the actuator's ID
         super().mousePressEvent(event)
-
+        
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -618,6 +630,10 @@ class Actuator(QGraphicsItem):
         # Apply the adjusted movement to all selected items
         for item in selected_items:
             item.moveBy(delta.x(), delta.y())
+
+        # Trigger a full repaint of the canvas during dragging
+        self.update()  # Force repaint of the canvas
+        canvas.update()  # Ensure the view is updated
 
         # Trigger a redraw of all lines
         canvas.redraw_all_lines()
@@ -752,6 +768,17 @@ class ActuatorCanvas(QGraphicsView):
         self.last_pan_point = QPointF()
         self.actuator_size = 20
 
+        self.scene.selectionChanged.connect(self.handle_selection_change)
+
+    def handle_selection_change(self):
+        # Force an update on the scene to repaint the actuators
+        for item in self.scene.selectedItems():
+            item.update()  # Ensure selected items are redrawn
+        
+        # Update the entire scene to clear any artifacts
+        self.scene.update()
+
+
     def draw_arrowhead(self, line, ratio=0.55):
         # Calculate the midpoint of the line
         midpoint = QPointF((line.p1().x() + ratio * (line.p2().x() - line.p1().x())), 
@@ -785,9 +812,9 @@ class ActuatorCanvas(QGraphicsView):
 
     def redraw_all_lines(self):
         """Redraw all lines connecting actuators."""
-        # Remove all existing lines and arrowheads
+        # Remove all existing lines and arrowheads except for the scale line and text
         for item in self.scene.items():
-            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)):
+            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)) and item != self.scale_line and item != self.scale_text:
                 self.scene.removeItem(item)
 
         # Redraw lines based on current actuator positions
@@ -901,27 +928,25 @@ class ActuatorCanvas(QGraphicsView):
             self.scene.removeItem(self.white_rect_item)
             self.white_rect_item = None
 
-        # Remove the old scale line and text if they exist
-        if self.scale_line:
-            self.scene.removeItem(self.scale_line)
-            self.scale_line = None
-        if self.scale_text:
-            self.scene.removeItem(self.scale_text)
-            self.scale_text = None
-
         # Add the new white rectangle
         self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
         self.white_rect_item.setZValue(-999)
 
-        # Add the new scale line and text
-        self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                            self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
-                                            QPen(Qt.GlobalColor.black, 2))
-        self.scale_text = self.scene.addText("100 mm")
-        text_rect = self.scale_text.boundingRect()
-        self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
-        self.scale_line.setZValue(1000)
-        self.scale_text.setZValue(1000)
+        # Add the new scale line and text only if they don't exist
+        if not self.scale_line:
+            self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
+                                                self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
+                                                QPen(Qt.GlobalColor.black, 2))
+            self.scale_line.setZValue(1000)
+
+        if not self.scale_text:
+            self.scale_text = self.scene.addText("100 mm")
+            text_rect = self.scale_text.boundingRect()
+            self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
+            self.scale_text.setDefaultTextColor(Qt.GlobalColor.black)  # Set text color to black
+            self.scale_text.setZValue(1000)
+
+
 
 
     def update_scale_position(self):
@@ -1524,6 +1549,8 @@ class TimelineCanvas(FigureCanvas):
 
             self.draw()
 
+            # Store the plotted signal data for this actuator
+            self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.y_data
 
 
     def check_time_conflict(self, start_time, stop_time):
@@ -1781,6 +1808,8 @@ class CanvasSizeDialog(QDialog):
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
 
+
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1907,6 +1936,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Connect the no_actuator_selected signal to the switch_to_main_canvas slot
         self.actuator_canvas.no_actuator_selected.connect(self.switch_to_main_canvas)
 
+        # Add a dictionary to store signals for each actuator
+        self.actuator_signals = {}
+
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
@@ -1941,6 +1973,13 @@ class Haptics_App(QtWidgets.QMainWindow):
         color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
         self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
         self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
+
+        # Retrieve and plot the signal data for this actuator
+        if actuator_id in self.actuator_signals:
+            self.timeline_canvas.y_data = self.actuator_signals[actuator_id]
+            t = np.linspace(0, self.total_time, 500)
+            self.timeline_canvas.axes.plot(t, self.timeline_canvas.y_data, color='white')
+            self.timeline_canvas.draw()
 
     def switch_to_main_canvas(self):
         # Check if already on MplCanvas, no need to switch if it is
@@ -2150,9 +2189,12 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
 
+            # Update the actuator_signals dictionary to reflect the ID change
+            if old_actuator_id in self.actuator_signals:
+                self.actuator_signals[new_actuator_id] = self.actuator_signals.pop(old_actuator_id)
+
             # Immediately update the plotter to reflect the changes
             self.update_plotter(new_actuator_id, actuator_type, color)
-
 
             
     def remove_actuator_from_timeline(self, actuator_id):
@@ -2160,6 +2202,11 @@ class Haptics_App(QtWidgets.QMainWindow):
             actuator_widget, actuator_label = self.timeline_widgets.pop(actuator_id)
             self.timeline_layout.removeWidget(actuator_widget)
             actuator_widget.deleteLater()  # Properly delete the widget
+        
+        # Remove the associated signal data
+        if actuator_id in self.actuator_signals:
+            del self.actuator_signals[actuator_id]
+
 
     def import_waveform(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
