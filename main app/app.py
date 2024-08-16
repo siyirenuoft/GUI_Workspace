@@ -957,29 +957,33 @@ class ActuatorCanvas(QGraphicsView):
             self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
 
     def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+
         if event.button() == Qt.MouseButton.LeftButton:
-            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-            super().mousePressEvent(event)
-        elif event.button() == Qt.MouseButton.MiddleButton:
+            if isinstance(item, Actuator):  # Left-click on an actuator
+                self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                item.signal_handler.clicked.emit(item.id)  # Emit the signal with the actuator's ID from the Actuator
+                super().mousePressEvent(event)
+            else:
+                self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+                self.no_actuator_selected.emit()  # Emit the signal when no actuator is selected
+                super().mousePressEvent(event)
+
+        elif event.button() == Qt.MouseButton.MiddleButton:  # Enable panning with middle mouse button
             self.panning = True
             self.last_pan_point = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
-        elif event.button() == Qt.MouseButton.RightButton and isinstance(self.itemAt(event.pos()), Actuator):
-            self.show_context_menu(self.itemAt(event.pos()), event.pos())
-        else:
-            super().mousePressEvent(event)
-    
-    def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        if isinstance(item, Actuator):
-            if event.button() == Qt.MouseButton.RightButton:  # Detect right-click
+
+        elif event.button() == Qt.MouseButton.RightButton:  # Context menu for right-click
+            if isinstance(item, Actuator):
                 self.show_context_menu(item, event.pos())
             else:
-                super().mousePressEvent(event)
-        else:
-            self.no_actuator_selected.emit()  # Emit the signal when no actuator is selected
+                self.no_actuator_selected.emit()
             super().mousePressEvent(event)
+
+
 
 
 
@@ -1243,6 +1247,18 @@ class ActuatorCanvas(QGraphicsView):
         self.branch_colors.clear()
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
+
+    def clear_lines_except_scale(self):
+        # Remove all lines and arrows except the scale line and scale text
+        for item in self.scene.items():
+            if isinstance(item, QGraphicsLineItem) and item != self.scale_line:
+                self.scene.removeItem(item)
+            elif isinstance(item, QGraphicsPolygonItem):  # Assuming arrows are polygons
+                self.scene.removeItem(item)
+            elif isinstance(item, QGraphicsTextItem) and item != self.scale_text:
+                self.scene.removeItem(item)
+
+
 
 class SelectionBarView(QGraphicsView):
     def __init__(self, scene, parent=None):
@@ -2022,13 +2038,14 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         if result == QMessageBox.StandardButton.Yes:
             # If user confirms, clear the canvas and timeline
-            self.actuator_canvas.clear_canvas()
-            self.clear_timeline_canvas()
+            self.actuator_canvas.clear_lines_except_scale()  # Clear lines, not the scale line
+            self.actuator_canvas.clear_canvas()  # Clear actuators
+            self.clear_timeline_canvas()  # Clear timeline
             self.reset_color_management()
         else:
             # If user cancels, do nothing
             return
-
+    
 
     def clear_timeline_canvas(self):
         # Clear the timeline layout
