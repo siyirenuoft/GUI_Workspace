@@ -119,7 +119,9 @@ class MplCanvas(FigureCanvas):
 
     def clear_plot(self):
         self.current_signal = None
+        self.app_reference.first_signal_drop = 0
         self.plot([], [])
+        print(self.app_reference.first_signal_drop)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
@@ -131,10 +133,19 @@ class MplCanvas(FigureCanvas):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
 
-        # Determine if the dropped signal is imported
+        # Initialize customized_signal to None
+        customized_signal = None
+
+        # Check if the dropped signal is an imported one
         if signal_type in self.app_reference.imported_signals:
             customized_signal = self.app_reference.imported_signals[signal_type]
             self.add_signal(customized_signal, combine=True)
+
+        # Check if the signal is a customized one
+        elif signal_type in self.app_reference.custom_signals:
+            customized_signal = self.app_reference.custom_signals[signal_type]
+            self.add_signal(customized_signal, combine=True)
+
         else:
             parameters = {}  # Dictionary to store parameters
 
@@ -156,9 +167,13 @@ class MplCanvas(FigureCanvas):
                     customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-            # If a customized signal was created, add it to the plot
-            if customized_signal:
-                self.add_signal(customized_signal, combine=True)
+        # If a customized signal was created or retrieved, add it to the plot
+        if customized_signal:
+            self.add_signal(customized_signal, combine=True)
+        
+        self.app_reference.first_signal_drop += 1
+        print("drop",self.app_reference.first_signal_drop)
+
 
     def generate_custom_envelope_json(self, signal_type, duration, amplitude):
         num_samples = int(duration * 500)  # Adjust the number of samples to match the duration
@@ -1823,7 +1838,7 @@ class CanvasSizeDialog(QDialog):
         self.layout.addWidget(button)
 
 
-
+        
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1844,7 +1859,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.statusBar().showMessage("Welcome to Haptics App")
 
         # Add a flag to track the first signal drop
-        self.first_signal_drop = True
+        self.first_signal_drop = 0
         self.total_time = None
 
         if os.path.exists(icon_path):
@@ -2054,6 +2069,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.actuator_canvas.clear_canvas()  # Clear actuators
             self.clear_timeline_canvas()  # Clear timeline
             self.reset_color_management()
+            
         else:
             # If user cancels, do nothing
             return
@@ -2321,10 +2337,18 @@ class Haptics_App(QtWidgets.QMainWindow):
             }
         """)
         tree.setDragEnabled(True)
+
         tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         tree.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
         tree.setToolTipDuration(2000)  # Set tooltip duration to 2 seconds
 
+
+        # Disable drag by default
+        tree.setDragEnabled(False)
+
+        # Connect to itemPressed to control dragging behavior
+        tree.itemPressed.connect(self.on_tree_item_pressed)
+        
         # Create top-level items
         oscillators = QTreeWidgetItem(tree)
         oscillators.setText(0, "Oscillators")
@@ -2370,6 +2394,13 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Enable context menu
         tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         tree.customContextMenuRequested.connect(self.on_custom_context_menu)
+
+    def on_tree_item_pressed(self, item, column):
+        # Enable dragging only if the item is a child item (i.e., it has a parent)
+        if item.parent() is not None:
+            self.ui.treeWidget.setDragEnabled(True)
+        else:
+            self.ui.treeWidget.setDragEnabled(False)
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_clicked(self, item, column):
@@ -2484,6 +2515,17 @@ class Haptics_App(QtWidgets.QMainWindow):
         return False
 
     def save_current_signal(self):
+        print("start save")
+        print("save",self.first_signal_drop)
+        # Check if the first signal has been saved
+        if self.first_signal_drop == 1:
+            print("first signal")
+            # Always prompt "Signal already exists" for the first signal and do not save it
+            QMessageBox.information(self, "Reminder", "Signal already exists!", QMessageBox.StandardButton.Ok)
+            # self.first_signal_drop = False  # Set the flag to False after the first attempt
+            return  # Do not proceed with saving the signal
+
+        # Continue with saving for subsequent signals
         if self.maincanvas.current_signal is not None:
             signal_data = {
                 "value0": {
@@ -2521,8 +2563,9 @@ class Haptics_App(QtWidgets.QMainWindow):
                 },
                 "data": self.maincanvas.current_signal.tolist()
             }
+            
             if self.signal_exists(signal_data):
-                QMessageBox.information(self, "Reminder", "Signal Already Exist!", QMessageBox.StandardButton.Ok)
+                QMessageBox.information(self, "Reminder", "Signal already exists!", QMessageBox.StandardButton.Ok)
             else:
                 signal_name = f"Signal {self.signal_counter}"
                 self.signal_counter += 1
@@ -2533,6 +2576,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 child.setData(0, QtCore.Qt.ItemDataRole.UserRole, signal_name)  # Store the original name
                 self.customizes.addChild(child)
                 self.custom_signals[signal_name] = signal_data  # Save the signal data
+
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_changed(self, item, column):

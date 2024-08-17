@@ -1672,12 +1672,9 @@ class TimelineCanvas(FigureCanvas):
         # Check if total time is set
         if self.app_reference.total_time is None:
             # If total time is not set, prompt the user to set it up
-            # self.app_reference.setup_total_time()
             self.app_reference.total_time = max(stop_time, start_time)
         elif stop_time > self.app_reference.total_time:
-            old_total_time = self.app_reference.total_time
             self.app_reference.total_time = stop_time
-            self.app_reference.add_zero_signal_for_new_time_range(old_total_time)
         else:
             self.app_reference.total_time = self.app_reference.total_time
     
@@ -1766,52 +1763,6 @@ class TimelineCanvas(FigureCanvas):
                     return start_time, stop_time
             else:
                 return None, None
-    
-    def remove_data_beyond_time(self, total_time):
-        total_points = 500
-        t = np.linspace(0, self.app_reference.total_time, total_points)
-
-        # Find the index where the time exceeds the new total_time
-        cut_off_index = int((total_time / self.app_reference.total_time) * total_points)
-
-        # Set the y-data beyond this index to zero
-        if hasattr(self, 'y_data'):
-            self.y_data[cut_off_index:] = 0
-            self.axes.clear()
-            self.axes.plot(t, self.y_data)
-            self.draw()
-
-    def add_zero_signal_for_new_range(self, old_total_time, new_total_time):
-        total_points = 500
-        t = np.linspace(0, new_total_time, total_points)  # Update to reflect the new total time
-        print("here!!!")
-        
-        # Ensure y_data is initialized
-        if not hasattr(self, 'y_data'):
-            self.y_data = np.zeros(total_points)
-            print("Initialized y_data.")
-
-        # Calculate the number of points corresponding to old and new total times
-        old_points = int((old_total_time / new_total_time) * total_points)
-        new_points = total_points
-
-        # Extend y_data with zeros if necessary
-        if len(self.y_data) < new_points:
-            # Create a new y_data array with zeros
-            new_y_data = np.zeros(new_points)
-
-            # Copy the old data into the new y_data array
-            new_y_data[:old_points] = self.y_data[:old_points]
-
-            # Replace y_data with the new array
-            self.y_data = new_y_data
-
-        # Clear the axes and plot the updated data
-        self.axes.clear()
-        
-        self.axes.plot(t, self.y_data)
-        self.draw()
-
 
 
 class TimeInputDialog(QDialog):
@@ -1878,7 +1829,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
 
-        self.ui.pushButton_5.clicked.connect(self.setup_total_time)
         self.statusBar().showMessage("Welcome to Haptics App")
 
         # Add a flag to track the first signal drop
@@ -1991,6 +1941,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add a dictionary to store signals for each actuator
         self.actuator_signals = {}
 
+        # Initialize timeline_canvases as an empty dictionary
+        self.timeline_canvases = {}
+
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
@@ -2025,6 +1978,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
         self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
         self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
+
+        # Store the TimelineCanvas in the dictionary
+        self.timeline_canvases[actuator_id] = self.timeline_canvas
 
         # Retrieve and plot the signal data for this actuator
         if actuator_id in self.actuator_signals:
@@ -2122,103 +2078,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
-    def setup_total_time(self):
-        msg_box = QInputDialog(self)
-        msg_box.setWindowTitle("Set up total time")
-        msg_box.setLabelText("Enter total time (in seconds):")
-        msg_box.setInputMode(QInputDialog.InputMode.DoubleInput)
-        msg_box.setDoubleDecimals(2)
-        msg_box.setDoubleMinimum(0)
-        if self.total_time is not None:
-            msg_box.setDoubleValue(self.total_time)
 
-        # Set the custom stylesheet
-        msg_box.setStyleSheet("""
-            QInputDialog { background-color: white; }
-            QLabel { color: black; }
-            QPushButton { 
-                background-color: white; 
-                color: black; 
-                border: 1px solid black; 
-                padding: 5px; 
-            }
-            QPushButton:hover { 
-                background-color: gray; 
-            }
-        """)
-
-        if msg_box.exec() == QDialog.DialogCode.Accepted:
-            new_total_time = msg_box.doubleValue()
-
-            if self.total_time is None:
-                # If total_time is None, simply set it to the new value without any checks
-                self.total_time = new_total_time
-            elif new_total_time < self.total_time:
-                # Warn the user about potential data loss
-                warning_box = QMessageBox(self)
-                warning_box.setWindowTitle("Warning")
-                warning_box.setText(f"The setting total time is less than the current total time ({self.total_time}s). "
-                                    "This may cause data loss. Do you still want to proceed?")
-                warning_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                warning_box.setStyleSheet("""
-                    QMessageBox { background-color: white; }
-                    QLabel { color: black; }
-                    QPushButton { 
-                        background-color: white; 
-                        color: black; 
-                        border: 1px solid black; 
-                        padding: 5px; 
-                    }
-                    QPushButton:hover { 
-                        background-color: gray; 
-                    }
-                """)
-                result = warning_box.exec()
-
-                if result == QMessageBox.StandardButton.Yes:
-                    self.total_time = new_total_time
-                    self.remove_data_beyond_total_time()
-                else:
-                    return  # Do nothing if the user clicks 'No'
-
-            elif new_total_time > self.total_time:
-                old_total_time = self.total_time
-                self.total_time = new_total_time
-                self.add_zero_signal_for_new_time_range(old_total_time)
-            else:
-                self.total_time = new_total_time
-
-            self.update_all_timeline_x_axis_limits()  # Update all timeline x-axes
-            self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
-        else:
-            self.statusBar().showMessage("Total time not set. Please set the total time using the 'Set Total Time' button.")
-
-    def remove_data_beyond_total_time(self):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.remove_data_beyond_time(self.total_time)
-
-    # def add_zero_signal_for_new_time_range(self, old_total_time):
-    #     for _, (timeline_widget, _) in self.timeline_widgets.items():
-    #         print(old_total_time, self.total_time)
-    #         timeline_widget.add_zero_signal_for_new_range(old_total_time, self.total_time)
-    def add_zero_signal_for_new_time_range(self, old_total_time):
-        # Ensure current_actuator is set and retrieve its corresponding TimelineCanvas
-        if self.current_actuator and self.current_actuator in self.timeline_widgets:
-            timeline_canvas, _ = self.timeline_widgets[self.current_actuator]
-            
-            if isinstance(timeline_canvas, TimelineCanvas):  # Ensure it's the correct type
-                print(f"Adding zero signal for range from {old_total_time} to {self.total_time} on actuator {self.current_actuator}")
-                timeline_canvas.add_zero_signal_for_new_range(old_total_time, self.total_time)
-            else:
-                print(f"Error: Timeline widget for {self.current_actuator} is not a TimelineCanvas.")
-        else:
-            print("Error: No current actuator selected or corresponding TimelineCanvas not found.")
-
-
-
-    def update_all_timeline_x_axis_limits(self):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.update_x_axis_limits()
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         # Convert the color to a suitable format for the stylesheet
