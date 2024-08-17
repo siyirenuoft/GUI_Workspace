@@ -1668,15 +1668,19 @@ class TimelineCanvas(FigureCanvas):
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
 
+        start_time, stop_time = self.show_time_input_dialog(signal_type)
         # Check if total time is set
         if self.app_reference.total_time is None:
             # If total time is not set, prompt the user to set it up
-            self.app_reference.setup_total_time()
-            # If the user cancels setting the total time, ignore the drop event
-            if self.app_reference.total_time is None:
-                return
-
-        start_time, stop_time = self.show_time_input_dialog(signal_type)
+            # self.app_reference.setup_total_time()
+            self.app_reference.total_time = max(stop_time, start_time)
+        elif stop_time > self.app_reference.total_time:
+            old_total_time = self.app_reference.total_time
+            self.app_reference.total_time = stop_time
+            self.app_reference.add_zero_signal_for_new_time_range(old_total_time)
+        else:
+            self.app_reference.total_time = self.app_reference.total_time
+    
         
         if start_time is not None and stop_time is not None:
             # Check if the start time or stop time exceeds the total time
@@ -1779,17 +1783,36 @@ class TimelineCanvas(FigureCanvas):
 
     def add_zero_signal_for_new_range(self, old_total_time, new_total_time):
         total_points = 500
-        t = np.linspace(0, self.app_reference.total_time, total_points)
+        t = np.linspace(0, new_total_time, total_points)  # Update to reflect the new total time
+        print("here!!!")
         
-        if hasattr(self, 'y_data'):
-            start_index = int((old_total_time / self.app_reference.total_time) * total_points)
-            stop_index = int((new_total_time / self.app_reference.total_time) * total_points)
-            
-            # Extend y_data with zeros
-            self.y_data[start_index:stop_index] = 0
-            self.axes.clear()
-            self.axes.plot(t, self.y_data)
-            self.draw()
+        # Ensure y_data is initialized
+        if not hasattr(self, 'y_data'):
+            self.y_data = np.zeros(total_points)
+            print("Initialized y_data.")
+
+        # Calculate the number of points corresponding to old and new total times
+        old_points = int((old_total_time / new_total_time) * total_points)
+        new_points = total_points
+
+        # Extend y_data with zeros if necessary
+        if len(self.y_data) < new_points:
+            # Create a new y_data array with zeros
+            new_y_data = np.zeros(new_points)
+
+            # Copy the old data into the new y_data array
+            new_y_data[:old_points] = self.y_data[:old_points]
+
+            # Replace y_data with the new array
+            self.y_data = new_y_data
+
+        # Clear the axes and plot the updated data
+        self.axes.clear()
+        
+        self.axes.plot(t, self.y_data)
+        self.draw()
+
+
 
 class TimeInputDialog(QDialog):
     def __init__(self, signal_type, parent=None):
@@ -2174,9 +2197,23 @@ class Haptics_App(QtWidgets.QMainWindow):
         for _, (timeline_widget, _) in self.timeline_widgets.items():
             timeline_widget.remove_data_beyond_time(self.total_time)
 
+    # def add_zero_signal_for_new_time_range(self, old_total_time):
+    #     for _, (timeline_widget, _) in self.timeline_widgets.items():
+    #         print(old_total_time, self.total_time)
+    #         timeline_widget.add_zero_signal_for_new_range(old_total_time, self.total_time)
     def add_zero_signal_for_new_time_range(self, old_total_time):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.add_zero_signal_for_new_range(old_total_time, self.total_time)
+        # Ensure current_actuator is set and retrieve its corresponding TimelineCanvas
+        if self.current_actuator and self.current_actuator in self.timeline_widgets:
+            timeline_canvas, _ = self.timeline_widgets[self.current_actuator]
+            
+            if isinstance(timeline_canvas, TimelineCanvas):  # Ensure it's the correct type
+                print(f"Adding zero signal for range from {old_total_time} to {self.total_time} on actuator {self.current_actuator}")
+                timeline_canvas.add_zero_signal_for_new_range(old_total_time, self.total_time)
+            else:
+                print(f"Error: Timeline widget for {self.current_actuator} is not a TimelineCanvas.")
+        else:
+            print("Error: No current actuator selected or corresponding TimelineCanvas not found.")
+
 
 
     def update_all_timeline_x_axis_limits(self):
@@ -2184,21 +2221,21 @@ class Haptics_App(QtWidgets.QMainWindow):
             timeline_widget.update_x_axis_limits()
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
+        # Convert the color to a suitable format for the stylesheet
         color_rgb = QColor(color).getRgbF()[:3]
-        actuator_widget = TimelineCanvas(parent=self.ui.scrollAreaWidgetContents, color=color_rgb, label=f"{actuator_type} - {new_id}", app_reference=self)
-        
-        # Ensure the same x and y axis labels are used across all timeline widgets
-        actuator_widget.axes.set_xlabel("Time (s)", fontsize=9.5)
-        actuator_widget.axes.set_ylabel("Amplitude", fontsize=9.5)
-        
-        # Optionally, set the x-axis limits if required
-        actuator_widget.axes.set_xlim(0, self.total_time if self.total_time else 10)  # Example: total_time or default to 10 seconds
-        actuator_widget.axes.set_ylim(-1, 1)  # Example: setting y-axis range
-        
+        color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
+
+        # Create a placeholder widget instead of TimelineCanvas
+        actuator_widget = QWidget(parent=self.ui.scrollAreaWidgetContents)
+        actuator_widget.setStyleSheet(color_style)  # Apply the background color
+
+        # Add a simple label to represent the actuator in the timeline area
         actuator_layout = QHBoxLayout(actuator_widget)
         actuator_label = QLabel(f"{actuator_type} - {new_id}")
+        actuator_label.setStyleSheet("color: white;")  # Ensure text is visible
         actuator_layout.addWidget(actuator_label)
         
+        # Add the widget to the timeline layout
         self.timeline_layout.addWidget(actuator_widget)
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
 
@@ -2207,19 +2244,19 @@ class Haptics_App(QtWidgets.QMainWindow):
         if old_actuator_id in self.timeline_widgets:
             actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
             
-            # Update the canvas color
+            # Convert the color to a suitable format for the stylesheet
             color_rgb = QColor(color).getRgbF()[:3]
-            actuator_widget.update_canvas(color=color_rgb, label=f"{actuator_type} - {new_actuator_id}")
+            color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
             
-            # Update the widget background color
-            actuator_widget.setStyleSheet(f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 0);")
+            # Update the widget's background color
+            actuator_widget.setStyleSheet(color_style)
             
-            # Update the label
+            # Update the label text
             actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
             
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
-
+            
             # Update the actuator_signals dictionary to reflect the ID change
             if old_actuator_id in self.actuator_signals:
                 self.actuator_signals[new_actuator_id] = self.actuator_signals.pop(old_actuator_id)
@@ -2227,6 +2264,9 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Immediately update the plotter to reflect the changes
             self.update_plotter(new_actuator_id, actuator_type, color)
 
+
+
+   
             
     def remove_actuator_from_timeline(self, actuator_id):
         if actuator_id in self.timeline_widgets:
