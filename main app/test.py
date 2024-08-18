@@ -2091,6 +2091,9 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Track the last stop time to insert gaps
                 last_stop_time = 0
 
+                # Sort signals by start time
+                signals.sort(key=lambda signal: signal["start_time"])
+
                 for signal in signals:
                     # Calculate the relative width of the signal widget based on its duration
                     signal_duration = signal["stop_time"] - signal["start_time"]
