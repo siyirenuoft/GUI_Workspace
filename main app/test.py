@@ -1464,6 +1464,164 @@ class TimelineCanvas(FigureCanvas):
         
         self.signals = []  # List to store each signal's data along with their parameters
 
+        # Variables to track dragging
+        self._dragging = False
+        self._last_mouse_x = None
+
+        # dragggg
+        self.signal_duration = 0  # Store the signal duration
+
+    # dragggg
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
+            self._dragging = True
+            self._last_mouse_x = event.position().x()
+    # dragggg
+    def mouseMoveEvent(self, event):
+        if self._dragging and self.signal_duration > 10:
+            dx = event.position().x() - self._last_mouse_x
+            self._last_mouse_x = event.position().x()
+            xmin, xmax = self.axes.get_xlim()
+            delta_x = dx * (xmax - xmin) / self.fig.get_size_inches()[0] / self.fig.dpi
+            # Limit dragging to the signal duration
+            if xmin - delta_x >= 0 and xmax - delta_x <= self.signal_duration:
+                self.axes.set_xlim(xmin - delta_x, xmax - delta_x)
+                self.draw()
+    # dragggg
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+
+    def check_overlap(self, new_start_time, new_stop_time):
+        for signal in self.signals:
+            if not (new_stop_time <= signal["start_time"] or new_start_time >= signal["stop_time"]):
+                return True
+        return False
+
+    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Time Range Overlap")
+        msg_box.setText(f"The time range overlaps with an existing signal.")
+        msg_box.setInformativeText("Would you like to replace the overlapping region or reset the time range of the new signal?")
+
+        replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
+        reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
+
+        msg_box.exec()
+
+        if msg_box.clickedButton() == replace_button:
+            self.replace_overlap(new_start_time, new_stop_time, signal_data)
+        else:
+            # Adjust the previous signal to keep non-overlapping parts
+            self.adjust_previous_signals(new_start_time, new_stop_time)
+
+            # Prompt the user to set a new time range for the new signal
+            start_time, stop_time = self.show_time_input_dialog(signal_type)
+            if start_time is not None and stop_time is not None and stop_time > start_time:
+                if self.check_overlap(start_time, stop_time):
+                    self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                else:
+                    self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+
+
+    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data):
+        adjusted_signals = []
+
+        for signal in self.signals:
+            if signal["start_time"] < new_start_time < signal["stop_time"]:
+                # Case: The new signal overlaps the end of this signal
+                if new_stop_time < signal["stop_time"]:
+                    # Trim the end of the original signal and keep the non-overlapping part
+                    signal_part = {
+                        "type": signal["type"],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "start_time": signal["start_time"],
+                        "stop_time": new_start_time,
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part)
+                else:
+                    # Remove the overlapping portion of the original signal
+                    signal["stop_time"] = new_start_time
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    adjusted_signals.append(signal)
+
+            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
+                # Case: The new signal overlaps the start of this signal
+                signal["start_time"] = new_stop_time
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                adjusted_signals.append(signal)
+
+            elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
+                # Case: The new signal completely overlaps this signal, so the original signal is removed
+
+                continue
+            else:
+                # No overlap, keep the signal as is
+                adjusted_signals.append(signal)
+
+        # Add the new signal as well
+        adjusted_signals.append({
+            "type": None,
+            "data": new_signal_data,
+            "start_time": new_start_time,
+            "stop_time": new_stop_time,
+            "parameters": None
+        })
+
+        self.signals = adjusted_signals
+        self.plot_all_signals()  # Update the plot with the modified signals
+
+
+    def adjust_previous_signals(self, new_start_time, new_stop_time):
+        adjusted_signals = []
+        for signal in self.signals:
+            if signal["start_time"] < new_start_time < signal["stop_time"]:
+                # Case: The new signal overlaps the end of this signal
+                if new_stop_time < signal["stop_time"]:
+                    # Trim the end of the original signal and keep the non-overlapping part
+                    signal_part = {
+                        "type": signal["type"],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "start_time": signal["start_time"],
+                        "stop_time": new_start_time,
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part)
+                else:
+                    # Remove the overlapping portion of the original signal
+                    signal["stop_time"] = new_start_time
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    adjusted_signals.append(signal)
+            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
+                # Case: The new signal overlaps the start of this signal
+                signal["start_time"] = new_stop_time
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                adjusted_signals.append(signal)
+            elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
+                # Case: The new signal completely overlaps this signal
+                signal_part1 = {
+                    "type": signal["type"],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                    "start_time": signal["start_time"],
+                    "stop_time": new_start_time,
+                    "parameters": signal["parameters"]
+                }
+                signal_part2 = {
+                    "type": signal["type"],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
+                    "start_time": new_stop_time,
+                    "stop_time": signal["stop_time"],
+                    "parameters": signal["parameters"]
+                }
+                adjusted_signals.extend([signal_part1, signal_part2])
+            else:
+                # No overlap, keep the signal as is
+                adjusted_signals.append(signal)
+
+        self.signals = adjusted_signals
+
+
     def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
         self.axes.set_xlabel('')  # Remove default xlabel
         self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize, color=color, ha='left', va='center')
@@ -1475,38 +1633,37 @@ class TimelineCanvas(FigureCanvas):
             event.ignore()
 
     def dropEvent(self, event):
-        # Get the dragged signal type
-        item = event.source().selectedItems()[0]
-        signal_type = item.text(0)
+            # Get the dragged signal type
+            item = event.source().selectedItems()[0]
+            signal_type = item.text(0)
 
-        # Determine if the signal is customized or imported
-        if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
-            # Handle customized or imported signals
-            signal_data = self.get_signal_data(signal_type)
-            if signal_data:
-                start_time, stop_time = self.show_time_input_dialog(signal_type)
-                # Check that stop_time is greater than start_time and neither is None
-                if start_time is not None and stop_time is not None and stop_time > start_time:
-                    self.record_signal(signal_type, signal_data, start_time, stop_time, None)
-                else:
-                    return  # Do nothing if the times are invalid
-        else:
-            # Handle predefined signals where parameters can be modified
-            parameters = self.prompt_signal_parameters(signal_type)
-            if parameters is not None:
-                start_time, stop_time = self.show_time_input_dialog(signal_type)
-                # Check that stop_time is greater than start_time and neither is None
-                if start_time is not None and stop_time is not None and stop_time > start_time:
-                    signal_data = self.generate_signal_data(signal_type, parameters)
-                    self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
-                else:
-                    return  # Do nothing if the times are invalid or user canceled
+            # Determine if the signal is customized or imported
+            if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
+                signal_data = self.get_signal_data(signal_type)
+                if signal_data:
+                    start_time, stop_time = self.show_time_input_dialog(signal_type)
+                    if start_time is not None and stop_time is not None and stop_time > start_time:
+                        if self.check_overlap(start_time, stop_time):
+                            self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                        else:
+                            self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+            else:
+                parameters = self.prompt_signal_parameters(signal_type)
+                if parameters is not None:
+                    start_time, stop_time = self.show_time_input_dialog(signal_type)
+                    if start_time is not None and stop_time is not None and stop_time > start_time:
+                        signal_data = self.generate_signal_data(signal_type, parameters)
+                        if self.check_overlap(start_time, stop_time):
+                            self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                        else:
+                            self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
 
-        # After recording the new signal, update the plot
-        if self.signals:  # Plot only if signals have been recorded
-            self.plot_all_signals()
-        
-        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
+            # After recording the new signal, update the plot
+            if self.signals:
+                self.plot_all_signals()
+
+            self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
+
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -1543,6 +1700,10 @@ class TimelineCanvas(FigureCanvas):
         # Determine the max stop time across all recorded signals
         max_stop_time = max([signal["stop_time"] for signal in self.signals])
 
+        # dragggg
+        # Store the signal duration for use in dragging functionality
+        self.signal_duration = max_stop_time
+
         # Initialize an empty array of zeros for the full duration
         total_samples = int(max_stop_time * 500)
         combined_signal = np.zeros(total_samples)
@@ -1576,6 +1737,13 @@ class TimelineCanvas(FigureCanvas):
 
         # Plot the signal data
         self.axes.plot(t, signal_data, color=spine_color)
+
+        # dragggg
+        # Check if the signal is longer than 10 seconds
+        if self.signal_duration > 20:
+            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
+      
+
         self.draw()
 
     def generate_signal_data(self, signal_type, parameters):
@@ -1913,7 +2081,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Display the signal type and parameters in the status bar
         self.statusBar().showMessage(f"Current Signal: {signal_type} | Parameters: {param_str}")
 
-
     def clear_canvas_and_timeline(self):
         # Prompt a warning to the user
         msg_box = QMessageBox(self)
@@ -1949,7 +2116,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             # If user cancels, do nothing
             return
-
 
     def clear_timeline_canvas(self):
         # Clear the timeline layout
