@@ -452,18 +452,18 @@ ACTUATOR_CONFIG = {
 # Predefined color list for actuators (20 colors)
 COLOR_LIST = [
     QColor(194, 166, 159),  # Pale Taupe
-    QColor(171, 205, 239),  # Light Blue
+    # QColor(171, 205, 239),  # Light Blue
     QColor(194, 178, 128),  # Khaki
-    QColor(242, 215, 213),  # Misty Rose
-    QColor(204, 204, 255),  # Lavender
-    QColor(200, 202, 167),  # Pale Goldenrod
-    QColor(180, 144, 125),  # Tan
+    # QColor(242, 215, 213),  # Misty Rose
+    # QColor(204, 204, 255),  # Lavender
+    # QColor(200, 202, 167),  # Pale Goldenrod
+    # QColor(180, 144, 125),  # Tan
     QColor(150, 143, 132),  # Dark Gray
-    QColor(206, 179, 139),  # Burly Wood
-    QColor(160, 159, 153),  # Light Slate Gray
+    # QColor(206, 179, 139),  # Burly Wood
+    # QColor(160, 159, 153),  # Light Slate Gray
     QColor(158, 175, 163),  # Dark Sea Green
     QColor(175, 167, 191),  # Thistle
-    QColor(224, 224, 224),  # Gainsboro
+    # QColor(224, 224, 224),  # Gainsboro
     QColor(192, 192, 192),  # Silver
     QColor(230, 159, 125),  # Peach
     QColor(255, 182, 193),  # Light Pink
@@ -879,10 +879,13 @@ class ActuatorCanvas(QGraphicsView):
         
         branch = new_id.split('.')[0]
         if branch not in self.branch_colors:
+
             if self.color_index < len(COLOR_LIST):
+                print("here",self.color_index)
                 self.branch_colors[branch] = COLOR_LIST[self.color_index]
                 self.color_index += 1
             else:
+                print("here!!!",self.color_index)
                 self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
         color = self.branch_colors[branch]
 
@@ -1123,46 +1126,64 @@ class ActuatorCanvas(QGraphicsView):
 
     def edit_actuator_properties(self, actuator):
         dialog = ActuatorPropertiesDialog(actuator, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            old_id = actuator.id
-            new_id = dialog.id_input.text()
-            actuator.id = new_id
-            
-            # Update color if branch has changed
-            old_branch = old_id.split('.')[0]
-            new_branch = new_id.split('.')[0]
-            if old_branch != new_branch:
-                if new_branch not in self.branch_colors:
-                    self.branch_colors[new_branch] = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-                actuator.color = self.branch_colors[new_branch]
-            
-            new_type = dialog.get_type()
-            if new_type != actuator.actuator_type:
-                actuator.actuator_type = new_type
-                # Reapply configuration for new type
-                config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
-                actuator.text_vertical_offset = config["text_vertical_offset"]
-                actuator.text_horizontal_offset = config["text_horizontal_offset"]
-                actuator.font_size_factor = config["font_size_factor"]
-                actuator.min_font_size = config["min_font_size"]
-                actuator.max_font_size = config["max_font_size"]
-            
-            actuator.predecessor = dialog.predecessor_input.text()
-            actuator.successor = dialog.successor_input.text()
-            
-            actuator.size = self.actuator_size  # Use the canvas's actuator size
-            
-            actuator.update()
-            
-            # Update other actuators if necessary
-            self.update_related_actuators(old_id, new_id)
+        while True:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                old_id = actuator.id
+                new_id = dialog.id_input.text()
 
-            self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
+                # Check for ID conflicts
+                if any(act.id == new_id and act != actuator for act in self.actuators):
+                    # Show a warning message if there's a conflict
+                    QMessageBox.warning(self, "ID Conflict Detected", f"Actuator ID '{new_id}' already exists. Please choose a different ID.")
+                    continue  # Reopen the dialog for the user to change the ID
+                
+                actuator.id = new_id
+                
+                # Update color if branch has changed
+                old_branch = old_id.split('.')[0]
+                new_branch = new_id.split('.')[0]
+                if old_branch != new_branch:
+                    if new_branch not in self.branch_colors:
+                        if self.color_index < len(COLOR_LIST):
+                            self.branch_colors[new_branch] = COLOR_LIST[self.color_index]
+                            self.color_index += 1
+                        else:
+                            self.branch_colors[new_branch] = generate_contrasting_color(list(self.branch_colors.values()))
+                    actuator.color = self.branch_colors[new_branch]
+                
+                new_type = dialog.get_type()
+                if new_type != actuator.actuator_type:
+                    actuator.actuator_type = new_type
+                    # Reapply configuration for new type
+                    config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
+                    actuator.text_vertical_offset = config["text_vertical_offset"]
+                    actuator.text_horizontal_offset = config["text_horizontal_offset"]
+                    actuator.font_size_factor = config["font_size_factor"]
+                    actuator.min_font_size = config["min_font_size"]
+                    actuator.max_font_size = config["max_font_size"]
+                
+                actuator.predecessor = dialog.predecessor_input.text()
+                actuator.successor = dialog.successor_input.text()
+                
+                actuator.size = self.actuator_size  # Use the canvas's actuator size
+                
+                actuator.update()
+                
+                # Update other actuators if necessary
+                self.update_related_actuators(old_id, new_id)
 
-            # Update plotter immediately
-            self.haptics_app.update_timeline_actuator(old_id, new_id, new_type, actuator.color.name())
+                self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
 
-            self.redraw_all_lines() # Trigger a redraw of all lines
+                # Update plotter immediately
+                self.haptics_app.update_timeline_actuator(old_id, new_id, new_type, actuator.color.name())
+
+                self.redraw_all_lines()  # Trigger a redraw of all lines
+
+                break  # Exit the loop if everything is fine
+
+            else:
+                break  # Exit if the dialog is canceled
+
 
 
     def update_related_actuators(self, old_id, new_id):
@@ -1745,7 +1766,7 @@ class TimelineCanvas(FigureCanvas):
 
         # dragggg
         # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 20:
+        if self.signal_duration > 10:
             self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
       
 
