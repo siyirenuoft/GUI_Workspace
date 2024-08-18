@@ -451,26 +451,26 @@ ACTUATOR_CONFIG = {
 
 # Predefined color list for actuators (20 colors)
 COLOR_LIST = [
-    QColor(194, 166, 159),  # Pale Taupe
-    # QColor(171, 205, 239),  # Light Blue
-    QColor(194, 178, 128),  # Khaki
-    # QColor(242, 215, 213),  # Misty Rose
-    # QColor(204, 204, 255),  # Lavender
-    # QColor(200, 202, 167),  # Pale Goldenrod
-    # QColor(180, 144, 125),  # Tan
-    QColor(150, 143, 132),  # Dark Gray
-    # QColor(206, 179, 139),  # Burly Wood
-    # QColor(160, 159, 153),  # Light Slate Gray
     QColor(158, 175, 163),  # Dark Sea Green
+    QColor(194, 166, 159),  # Pale Taupe
+    QColor(194, 178, 128),  # Khaki
+    QColor(145, 141, 18),  # Khaki
+    QColor(150, 143, 132),  # Dark Gray
     QColor(175, 167, 191),  # Thistle
-    # QColor(224, 224, 224),  # Gainsboro
-    QColor(192, 192, 192),  # Silver
-    QColor(230, 159, 125),  # Peach
-    QColor(255, 182, 193),  # Light Pink
-    QColor(139, 121, 94),   # Umber
-    QColor(169, 196, 176),  # Dark Moss Green
     QColor(144, 175, 197),  # Cadet Blue
-    QColor(188, 170, 164)   # Rosy Brown
+    QColor(151, 102, 102),  
+    QColor(227, 140, 122),
+    QColor(103, 98, 172),
+    QColor(33, 104, 80),
+    QColor(183, 87, 116),
+    QColor(119, 80, 29),
+    QColor(172, 94, 169),
+    QColor(81, 146, 58),
+    QColor(21, 45, 138),
+    QColor(206, 21, 39),
+    QColor(199, 90, 18),
+    QColor(100, 199, 187),
+    QColor(209, 139, 0),
 ]
 
 # Function to generate a contrasting color
