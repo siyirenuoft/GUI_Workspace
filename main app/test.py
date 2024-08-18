@@ -1438,7 +1438,6 @@ class CreateBranchDialog(QDialog):
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
-
 class TimelineCanvas(FigureCanvas):
 
     def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
@@ -1463,7 +1462,7 @@ class TimelineCanvas(FigureCanvas):
         self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
         self.setAcceptDrops(True)
         
-        self.signals = {}  # Dictionary to store signal data with time ranges
+        self.signals = []  # List to store each signal's data along with their parameters
 
     def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
         self.axes.set_xlabel('')  # Remove default xlabel
@@ -1486,14 +1485,27 @@ class TimelineCanvas(FigureCanvas):
             signal_data = self.get_signal_data(signal_type)
             if signal_data:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
-                self.plot_signal(signal_data, start_time, stop_time)
+                # Check that stop_time is greater than start_time and neither is None
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+                else:
+                    return  # Do nothing if the times are invalid
         else:
             # Handle predefined signals where parameters can be modified
             parameters = self.prompt_signal_parameters(signal_type)
             if parameters is not None:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
-                signal_data = self.generate_signal_data(signal_type, parameters)
-                self.plot_signal(signal_data, start_time, stop_time)
+                # Check that stop_time is greater than start_time and neither is None
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    signal_data = self.generate_signal_data(signal_type, parameters)
+                    self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
+                else:
+                    return  # Do nothing if the times are invalid or user canceled
+
+        # After recording the new signal, update the plot
+        if self.signals:  # Plot only if signals have been recorded
+            self.plot_all_signals()
+
 
     def prompt_signal_parameters(self, signal_type):
         # This method prompts the user to modify the signal parameters using a dialog.
@@ -1507,24 +1519,46 @@ class TimelineCanvas(FigureCanvas):
                 return dialog.get_config()
         return None
 
-    def plot_signal(self, signal_data, start_time, stop_time):
-        total_duration = stop_time - start_time
-        signal_duration = len(signal_data) / 500  # Assuming 500 samples per second
-        
-        if signal_duration < total_duration:
-            # Repeat the signal to cover the total_duration
-            repeat_factor = int(np.ceil(total_duration / signal_duration))
-            signal_data = np.tile(signal_data, repeat_factor)[:int(total_duration * 500)]
-        elif signal_duration > total_duration:
-            # Segment the signal to match the total_duration
-            signal_data = signal_data[:int(total_duration * 500)]
-        else:
-            # If the duration exactly matches, use the signal as is
-            signal_data = signal_data
+    def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
+        # Record the signal data and its parameters into the signals list
+        self.signals.append({
+            "type": signal_type,
+            "data": signal_data,
+            "start_time": start_time,
+            "stop_time": stop_time,
+            "parameters": parameters
+        })
+
+    def plot_all_signals(self):
+        if not self.signals:
+            # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
+            default_duration = 10  # seconds
+            t = np.linspace(0, default_duration, 500 * default_duration)
+            signal_data = np.zeros_like(t)
+            self.plot_signal_data(t, signal_data)
+            return
+
+        # Determine the max stop time across all recorded signals
+        max_stop_time = max([signal["stop_time"] for signal in self.signals])
+
+        # Initialize an empty array of zeros for the full duration
+        total_samples = int(max_stop_time * 500)
+        combined_signal = np.zeros(total_samples)
+
+        # Fill in the combined signal with each recorded signal's data
+        for signal in self.signals:
+            start_sample = int(signal["start_time"] * 500)
+            stop_sample = int(signal["stop_time"] * 500)
+            signal_duration = stop_sample - start_sample
+            # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
+            signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            combined_signal[start_sample:stop_sample] = signal_data
 
         # Generate time array for the x-axis
-        t = np.linspace(start_time, stop_time, len(signal_data))
+        t = np.linspace(0, max_stop_time, total_samples)
+        self.plot_signal_data(t, combined_signal)
 
+    def plot_signal_data(self, t, signal_data):
         # Clear the current plot and plot the new signal
         self.axes.clear()
         # Set spine color and customize appearance
@@ -1537,10 +1571,10 @@ class TimelineCanvas(FigureCanvas):
         self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
         self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
         self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
-        self.axes.plot(t, signal_data, color=spine_color)  # Customize plot color if needed
+
+        # Plot the signal data
+        self.axes.plot(t, signal_data, color=spine_color)
         self.draw()
-
-
 
     def generate_signal_data(self, signal_type, parameters):
         # Generate the signal data based on the type and modified parameters

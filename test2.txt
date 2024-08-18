@@ -1663,33 +1663,35 @@ class TimelineCanvas(FigureCanvas):
             event.accept()
         else:
             event.ignore()
- 
+
     def plot_custom_signal(self, customized_signal, start_time, stop_time):
         signal_data = np.array(customized_signal["data"])
 
-        # Generate time array for the entire timeline
+        # Generate time array corresponding to the total time and timeline canvas
         total_points = 500
         t = np.linspace(0, self.app_reference.total_time, total_points)
-        
-        # Ensure y_data is initialized
+
+        # Initialize y_data if not already done
         if not hasattr(self, 'y_data'):
             self.y_data = np.zeros_like(t)
 
-        # Determine the start and stop indices based on the scaling factor
+        # Determine the start and stop indices for the plotting
         start_index = int((start_time / self.app_reference.total_time) * total_points)
         stop_index = int((stop_time / self.app_reference.total_time) * total_points)
-        
-        # Rescale the signal data to fit within the time range
+
+        # Ensure the signal data fits within the time range
         signal_length = stop_index - start_index
-        signal_time = np.linspace(0, 1, len(signal_data))
-        scaled_signal_data = np.interp(np.linspace(0, 1, signal_length), signal_time, signal_data)
-        
-        # Insert the scaled signal into y_data
-        self.y_data[start_index:stop_index] = scaled_signal_data
-        
-        # Plot the updated signal
+        if len(signal_data) > signal_length:
+            signal_data = signal_data[:signal_length]
+        elif len(signal_data) < signal_length:
+            signal_data = np.pad(signal_data, (0, signal_length - len(signal_data)))
+
+        # Add the signal data to the appropriate section of the timeline canvas
+        self.y_data[start_index:stop_index] = signal_data
+
+        # Clear the axes and plot the updated signal
         self.axes.clear()
-        self.axes.plot(t, self.y_data, color='blue')
+        self.axes.plot(t, self.y_data, color='blue')  # You can change color or add more styling if needed
         self.axes.set_xlim(0, self.app_reference.total_time)
         self.draw()
 
@@ -1734,10 +1736,9 @@ class TimelineCanvas(FigureCanvas):
             dialog = EnvelopeDialog(signal_type, self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 config = dialog.get_config()
-
-                # Generate normalized time array (0 to 1) for the signal
-                t = np.linspace(0, 1, 500)
-            
+                # Generate the customized envelope signal based on user inputs
+                num_samples = int(config["duration"] * 500)
+                t = np.linspace(0, config["duration"], num_samples)
                 if signal_type == "Envelope":
                     data = (config["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
                 elif signal_type == "Keyed Envelope":
@@ -1765,42 +1766,47 @@ class TimelineCanvas(FigureCanvas):
                 # Store the customized signal data
                 customized_signal = {"data": data}
 
-        # Only proceed if a customized signal was created
+        # Proceed only if a customized signal was created
         if customized_signal:
-            # Show the time input dialog to get the start and stop time
+            # Next, show the time range dialog for input
             start_time, stop_time = self.show_time_input_dialog(signal_type)
 
+            # Ensure total_time is initialized
             if self.app_reference.total_time is None:
                 self.app_reference.total_time = stop_time
-
-            # If new stop_time exceeds current total_time, update total_time
+            # Check if the new signal time range exceeds the current total time
             if stop_time > self.app_reference.total_time:
-                self.update_total_time_and_rescale(stop_time)
+                new_total_time = stop_time
+                # Rescale existing signals to the new total time
+                self.rescale_signals(new_total_time)
+                # Update the total time in the app
+                self.app_reference.total_time = new_total_time
 
-            # Plot the new signal
-            self.plot_custom_signal(customized_signal, start_time, stop_time)
+            # Plot the new signal after rescaling
+            if start_time is not None and stop_time is not None:
+                self.plot_custom_signal(customized_signal, start_time, stop_time)
 
-    def update_total_time_and_rescale(self, new_total_time):
-        # Rescale existing signals if total_time is updated
-        old_total_time = self.app_reference.total_time
-        self.app_reference.total_time = new_total_time
-
-        # Generate the new time array based on the updated total time
-        total_points = 500
-        t_new = np.linspace(0, new_total_time, total_points)
-
-        # If we have existing data, rescale it
+    def rescale_signals(self, new_total_time):
+        # Rescale existing signals to match the new total time
         if hasattr(self, 'y_data'):
-            t_old = np.linspace(0, old_total_time, len(self.y_data))
+            old_total_time = self.app_reference.total_time
+            total_points = len(self.y_data)
             
-            # Interpolate old data to fit the new total time
-            self.y_data = np.interp(t_new, t_old, self.y_data)
-
-        # Re-plot the rescaled data
-        self.axes.clear()
-        self.axes.plot(t_new, self.y_data, color='blue')
-        self.axes.set_xlim(0, new_total_time)
-        self.draw()
+            # Generate new time array based on the new total time
+            t_new = np.linspace(0, new_total_time, total_points)
+            
+            # Interpolate the old y_data onto the new time array
+            t_old = np.linspace(0, old_total_time, total_points)
+            rescaled_y_data = np.interp(t_new, t_old, self.y_data)
+            
+            # Update the y_data with the rescaled data
+            self.y_data = rescaled_y_data
+            
+            # Re-plot the rescaled data
+            self.axes.clear()
+            self.axes.plot(t_new, self.y_data, color='blue')
+            self.axes.set_xlim(0, new_total_time)
+            self.draw()
 
 
 
