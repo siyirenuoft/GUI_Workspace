@@ -1528,13 +1528,13 @@ class TimelineCanvas(FigureCanvas):
         adjusted_signals = []
 
         for signal in self.signals:
+            # Case 1: New signal overlaps the end of this signal
             if signal["start_time"] < new_start_time < signal["stop_time"]:
-                # Case: The new signal overlaps the end of this signal
                 if new_stop_time < signal["stop_time"]:
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],  # Correct slicing here
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -1543,34 +1543,39 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]  # Correct slicing here
                     adjusted_signals.append(signal)
 
+            # Case 2: New signal overlaps the start of this signal
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
-                # Case: The new signal overlaps the start of this signal
-                signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
-                adjusted_signals.append(signal)
+                signal_part = {
+                    "type": signal["type"],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],  # Adjust start of data
+                    "start_time": new_stop_time,
+                    "stop_time": signal["stop_time"],
+                    "parameters": signal["parameters"]
+                }
+                adjusted_signals.append(signal_part)
 
+            # Case 3: New signal completely overlaps this signal, so remove it
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
-                # Case: The new signal completely overlaps this signal, so the original signal is removed
+                continue  # Skip adding the signal since it is fully overlapped
 
-                continue
             else:
                 # No overlap, keep the signal as is
                 adjusted_signals.append(signal)
 
-        # Add the new signal as well
+        # Add the new signal to the list
         adjusted_signals.append({
-            "type": None,
-            "data": new_signal_data,
+            "type": "Sine",  # Ensure you set the correct signal type
+            "data": new_signal_data,  # Properly pass the new signal's data
             "start_time": new_start_time,
             "stop_time": new_stop_time,
-            "parameters": None
+            "parameters": {"frequency": 10.0, "rate": 1.0}  # Pass the correct parameters
         })
 
         self.signals = adjusted_signals
-        self.plot_all_signals()  # Update the plot with the modified signals
+        self.plot_all_signals()  # Replot all the signals after adjustments
 
 
     def adjust_previous_signals(self, new_start_time, new_stop_time):
@@ -1663,7 +1668,7 @@ class TimelineCanvas(FigureCanvas):
                 self.plot_all_signals()
 
             self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
-
+            self.app_reference.update_actuator_text()
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -2009,6 +2014,99 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Initialize timeline_canvases as an empty dictionary
         self.timeline_canvases = {}
+
+    def update_actuator_text(self):
+        # Find the global largest stop time across all actuators
+        all_stop_times = []
+        for signals in self.actuator_signals.values():
+            all_stop_times.extend([signal["stop_time"] for signal in signals])
+
+        if all_stop_times:
+            global_total_time = max(all_stop_times)
+        else:
+            global_total_time = 1  # Avoid division by zero in the width calculation
+
+        # Update the visual timeline for each actuator widget
+        for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
+            if actuator_id in self.actuator_signals:
+                signals = self.actuator_signals[actuator_id]
+
+                # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
+                # Assuming the first widget in the layout is the actuator label (ID and type)
+                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
+                    item = actuator_widget.layout().takeAt(i)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+                    else:
+                        del item  # Remove spacers
+
+                # Set up the layout for the actuator widget if not already done
+                if not actuator_widget.layout():
+                    layout = QtWidgets.QHBoxLayout()
+                    actuator_widget.setLayout(layout)
+                    layout.setContentsMargins(0, 0, 0, 0)
+                    layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
+
+                # Ensure the ID/Type label stays in the first position
+                if actuator_label.parent() is None:
+                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
+
+                # Create a container for the timeline and signal widgets
+                timeline_container = QtWidgets.QWidget(actuator_widget)
+                timeline_container.setStyleSheet("background-color: transparent;")
+                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
+                timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
+                timeline_layout.setContentsMargins(0, 0, 0, 0)
+                timeline_layout.setSpacing(0)
+
+                # Calculate the width of the actuator widget based on the global total time
+                widget_width = actuator_widget.size().width()
+
+                # Track the last stop time to insert gaps
+                last_stop_time = 0
+
+                for signal in signals:
+                    # Calculate the relative width of the signal widget based on its duration
+                    signal_duration = signal["stop_time"] - signal["start_time"]
+                    signal_width_ratio = signal_duration / global_total_time
+                    signal_width = int(signal_width_ratio * widget_width)
+
+                    # Calculate the relative starting position of the signal widget
+                    signal_start_ratio = signal["start_time"] / global_total_time
+                    signal_start_position = int(signal_start_ratio * widget_width)
+
+                    # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
+                    if signal["start_time"] > last_stop_time:
+                        gap_duration = signal["start_time"] - last_stop_time
+                        gap_width_ratio = gap_duration / global_total_time
+                        gap_width = int(gap_width_ratio * widget_width)
+
+                        # Add a spacer to represent the gap
+                        spacer = QtWidgets.QSpacerItem(gap_width, 30, QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Minimum)
+                        timeline_layout.addItem(spacer)
+
+                    # Create the signal widget, making it smaller vertically and with rounded corners
+                    signal_widget = QtWidgets.QLabel(f'{signal["type"]} ({", ".join([f"{k}: {v}" for k, v in (signal["parameters"] or {}).items()])})')
+                    signal_widget.setFixedSize(signal_width, 30)  # Set smaller height for the signal widget
+                    signal_widget.setStyleSheet("""
+                        background-color: rgba(100, 150, 250, 150); 
+                        color: white; 
+                        border-radius: 7px;
+                        padding: 3px;
+                    """)
+
+                    # Add the signal widget to the layout
+                    timeline_layout.addWidget(signal_widget)
+
+                    # Update the last stop time
+                    last_stop_time = signal["stop_time"]
+
+                # Add a stretch to fill the remaining space
+                timeline_layout.addStretch()
+
+                # Add the timeline container to the actuator widget after the ID and type
+                actuator_widget.layout().addWidget(timeline_container)
 
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):

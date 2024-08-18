@@ -1663,7 +1663,7 @@ class TimelineCanvas(FigureCanvas):
                 self.plot_all_signals()
 
             self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
-
+            self.app_reference.update_actuator_text()
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -1942,7 +1942,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
 
         # Enable scroll bars for the timeline canvas
-        self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        #self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.ui.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # Connect clear button to clear_plot method
@@ -2009,6 +2009,33 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Initialize timeline_canvases as an empty dictionary
         self.timeline_canvases = {}
+
+    def update_actuator_text(self):
+        # Find the global largest stop time across all actuators
+        all_stop_times = []
+        for signals in self.actuator_signals.values():
+            all_stop_times.extend([signal["stop_time"] for signal in signals])
+
+        if all_stop_times:
+            global_total_time = max(all_stop_times)
+        else:
+            global_total_time = 0
+
+        # Update the text for each actuator widget
+        for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
+            if actuator_id in self.actuator_signals:
+                signals = self.actuator_signals[actuator_id]
+
+                # Generate the signal text (show signal type, start/stop times, and parameters)
+                signal_texts = []
+                for signal in signals:
+                    param_str = ', '.join([f'{key}: {value}' for key, value in (signal["parameters"] or {}).items()])
+                    signal_text = f'{signal["type"]} ({param_str})\nStart: {signal["start_time"]:.2f}s, Stop: {signal["stop_time"]:.2f}s'
+                    signal_texts.append(signal_text)
+
+                # Set the text with the global largest time and signal details, including start and stop times
+                actuator_label.setText(f"Global Total Time: {global_total_time:.2f}s\n" + "\n".join(signal_texts))
+                actuator_label.setStyleSheet("color: white;")  # Ensure the text is visible
 
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
