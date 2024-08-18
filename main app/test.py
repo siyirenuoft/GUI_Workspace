@@ -299,7 +299,6 @@ class MplCanvas(FigureCanvas):
             "data": data
         }
 
-
 class PreviewCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=1, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -1272,7 +1271,6 @@ class ActuatorCanvas(QGraphicsView):
             elif isinstance(item, QGraphicsTextItem) and item != self.scale_text:
                 self.scene.removeItem(item)
 
-
 class SelectionBarView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(parent)
@@ -1440,223 +1438,36 @@ class CreateBranchDialog(QDialog):
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
 
+
 class TimelineCanvas(FigureCanvas):
 
     def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
-        # self.axes = self.fig.add_subplot(111)
         self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(color)
-
         
-        # Set y-axis to only show the 0 value
-    
-        self.axes.spines['top'].set_visible(True)
-        self.axes.spines['right'].set_visible(True)
-        self.axes.spines['left'].set_visible(True)  # Show left spine
-        self.axes.spines['bottom'].set_visible(True)  # Show bottom spine
-        
-        # Set spine color
-        spine_color = to_rgba((240/255, 235/255, 229/255))  # Custom color for the border
-
-        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
-        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
+        # Set spine color and customize appearance
+        spine_color = to_rgba((240/255, 235/255, 229/255))
         self.axes.spines['bottom'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
         self.axes.spines['right'].set_color(spine_color)
         self.axes.spines['left'].set_color(spine_color)
-        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
-
-        # Move x-axis label to the right side
-        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
-
-
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
+        
         super(TimelineCanvas, self).__init__(self.fig)
         self.setParent(parent)
         self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
         self.setAcceptDrops(True)
         
-        # Set the x-axis limits to [0, total_time]
-        self.update_x_axis_limits()
-
         self.signals = {}  # Dictionary to store signal data with time ranges
 
     def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
         self.axes.set_xlabel('')  # Remove default xlabel
-        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize,
-                           color=color, ha='left', va='center')
-
-    def update_x_axis_limits(self):
-        if self.app_reference.total_time is not None:
-            self.axes.set_xlim(0, self.app_reference.total_time)
-            self.draw()
-
-    def update_canvas(self, color, label):
-        self.fig.set_facecolor(color)
-        self.axes.set_facecolor(color)
-        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
-        self.update_x_axis_limits()  # Ensure x-axis limits are updated
-        self.draw()
-
-    
-
-    def plot_signal(self, signal_type, start_time, stop_time):
-        signal_data = self.get_signal_data(signal_type)
-        if signal_data is not None:
-            # Ensure stop_time does not exceed total_time
-            stop_time = min(stop_time, self.app_reference.total_time)
-            
-            # Generate time array
-            total_points = 500
-            t = np.linspace(0, self.app_reference.total_time, total_points)
-            
-            # Create y array, setting values outside the range to 0
-            if not hasattr(self, 'y_data'):
-                self.y_data = np.zeros_like(t)  # Initialize y_data only once
-            new_y = np.zeros_like(t)
-            
-            start_index = int((start_time / self.app_reference.total_time) * total_points)
-            stop_index = int((stop_time / self.app_reference.total_time) * total_points)
-            
-            new_y[start_index:stop_index] = signal_data[:stop_index - start_index]
-
-            # Check for conflicts
-            conflict = None
-            for i in range(start_index, stop_index):
-                if self.y_data[i] != 0 and new_y[i] != 0:
-                    conflict_start = t[i]
-                    while i < stop_index and self.y_data[i] != 0 and new_y[i] != 0:
-                        i += 1
-                    conflict_stop = t[i-1]
-                    conflict = (conflict_start, conflict_stop)
-                    break
-
-            if conflict:
-                action = self.show_conflict_dialog(conflict, start_time, stop_time)
-                if action == 'Replace':
-                    self.y_data[start_index:stop_index] = new_y[start_index:stop_index]
-                elif action == 'Reset':
-                    # Re-trigger the time input dialog for the user to reset the time range
-                    new_start_time, new_stop_time = self.show_time_input_dialog(signal_type)
-                    if new_start_time is not None and new_stop_time is not None:
-                        self.plot_signal(signal_type, new_start_time, new_stop_time)  # Recursively call plot_signal
-                    return
-                else:
-                    return
-            else:
-                self.y_data[start_index:stop_index] = new_y[start_index:stop_index]
-            
-            self.axes.clear()  # Clear previous plots
-
-
-            self.axes.spines['top'].set_visible(True)
-            self.axes.spines['right'].set_visible(True)
-            self.axes.spines['left'].set_visible(True)  # Show left spine
-            self.axes.spines['bottom'].set_visible(True)  # Show bottom spine
-
-            # Set spine color
-            spine_color = to_rgba((240/255, 235/255, 229/255))  # Custom color for the border
-            self.axes.spines['left'].set_color(spine_color)
-            self.axes.spines['bottom'].set_color(spine_color)
-            self.axes.spines['top'].set_color(spine_color)
-            self.axes.spines['right'].set_color(spine_color)
-            
-            # Set x and y labels
-            self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)  # Custom method for xlabel
-            self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)  # Adjust font size here
-            
-            self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
-            self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
-            
-
-            self.axes.plot(t, self.y_data, color=spine_color)
-
-     
-            self.axes.set_xlim(0, self.app_reference.total_time if self.app_reference.total_time else 10)  # Example: use total_time or default
-            # self.axes.set_ylim(-1, 1)  # Example: setting y-axis range
-
-            self.draw()
-
-            # Store the plotted signal data for this actuator
-            self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.y_data
-
-
-    def check_time_conflict(self, start_time, stop_time):
-        for existing_start, existing_stop in self.signals.keys():
-            if not (stop_time <= existing_start or start_time >= existing_stop):
-                return (existing_start, existing_stop)
-        return None
-
-    def show_conflict_dialog(self, conflict, start_time, stop_time):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Time Conflict Detected")
-        # msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal from {conflict[0]}s to {conflict[1]}s.")
-        msg_box.setText(f"The time range {start_time}s to {stop_time}s conflicts with an existing signal.")
-        msg_box.setInformativeText("Do you want to replace the conflicting signal or reset the time range of the new signal?")
-        
-        # Apply the custom stylesheet
-        msg_box.setStyleSheet("""
-            QMessageBox { background-color: white; }
-            QLabel { color: black; }
-            QPushButton { 
-                background-color: white; 
-                color: black; 
-                border: 1px solid black; 
-                padding: 5px; 
-            }
-            QPushButton:hover { 
-                background-color: gray; 
-            }
-        """)
-
-        replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
-        reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
-        msg_box.exec()
-
-        if msg_box.clickedButton() == replace_button:
-            return 'Replace'
-        else:
-            return 'Reset'
-
-
-    def replace_signal_in_range(self, start_time, stop_time, new_signal_data):
-        # Replace the conflicting part of the signal
-        self.remove_signal_in_range(start_time, stop_time)
-        self.add_signal_to_plot(start_time, stop_time, new_signal_data)
-
-    def reset_time_range(self, start_time, stop_time):
-        # Adjust the time range to avoid conflict
-        existing_times = sorted(self.signals.keys())
-        for existing_start, existing_stop in existing_times:
-            if start_time < existing_stop <= stop_time:
-                start_time = existing_stop
-            elif start_time <= existing_start < stop_time:
-                stop_time = existing_start
-        return start_time, stop_time
-
-    def add_signal_to_plot(self, start_time, stop_time, signal_data):
-        total_points = 500
-        t = np.linspace(0, self.app_reference.total_time, total_points)
-        y = np.zeros_like(t)
-        start_index = int((start_time / self.app_reference.total_time) * total_points)
-        stop_index = int((stop_time / self.app_reference.total_time) * total_points)
-        y[start_index:stop_index] = signal_data[:stop_index - start_index]
-
-        if len(self.signals) > 0:
-            current_y = self.axes.lines[0].get_ydata()
-            current_y[start_index:stop_index] = y[start_index:stop_index]
-            self.axes.lines[0].set_ydata(current_y)
-        else:
-            self.axes.plot(t, y)
-
-        self.signals[(start_time, stop_time)] = signal_data
-        self.draw()
-
-    def remove_signal_in_range(self, start_time, stop_time):
-        for (existing_start, existing_stop), _ in list(self.signals.items()):
-            if not (stop_time <= existing_start or start_time >= existing_stop):
-                del self.signals[(existing_start, existing_stop)]
+        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize, color=color, ha='left', va='center')
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
@@ -1665,51 +1476,149 @@ class TimelineCanvas(FigureCanvas):
             event.ignore()
 
     def dropEvent(self, event):
+        # Get the dragged signal type
         item = event.source().selectedItems()[0]
         signal_type = item.text(0)
 
-        # Check if total time is set
-        if self.app_reference.total_time is None:
-            # If total time is not set, prompt the user to set it up
-            self.app_reference.setup_total_time()
-            # If the user cancels setting the total time, ignore the drop event
-            if self.app_reference.total_time is None:
-                return
+        # Determine if the signal is customized or imported
+        if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
+            # Handle customized or imported signals
+            signal_data = self.get_signal_data(signal_type)
+            if signal_data:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                self.plot_signal(signal_data, start_time, stop_time)
+        else:
+            # Handle predefined signals where parameters can be modified
+            parameters = self.prompt_signal_parameters(signal_type)
+            if parameters is not None:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                signal_data = self.generate_signal_data(signal_type, parameters)
+                self.plot_signal(signal_data, start_time, stop_time)
 
-        start_time, stop_time = self.show_time_input_dialog(signal_type)
+    def prompt_signal_parameters(self, signal_type):
+        # This method prompts the user to modify the signal parameters using a dialog.
+        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+            dialog = OscillatorDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                return dialog.get_config()
+        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+            dialog = EnvelopeDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                return dialog.get_config()
+        return None
+
+    def plot_signal(self, signal_data, start_time, stop_time):
+        total_duration = stop_time - start_time
+        signal_duration = len(signal_data) / 500  # Assuming 500 samples per second
         
-        if start_time is not None and stop_time is not None:
-            # Check if the start time or stop time exceeds the total time
-            if start_time > self.app_reference.total_time or stop_time > self.app_reference.total_time:
-                # Show a warning message with custom style
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("Time Exceeds Total Time")
-                
-                msg_box.setText(f"Total time is only {self.app_reference.total_time} seconds. Please don't exceed the range or reset your total time.")
-                msg_box.setIcon(QMessageBox.Icon.Warning)
-                
-                # Apply the custom stylesheet
-                msg_box.setStyleSheet("""
-                    QMessageBox { background-color: white; }
-                    QLabel { color: black; }
-                    QPushButton { 
-                        background-color: white; 
-                        color: black; 
-                        border: 1px solid black; 
-                        padding: 5px; 
-                    }
-                    QPushButton:hover { 
-                        background-color: gray; 
-                    }
-                """)
-                
-                msg_box.exec()
-                return  # Stop further processing
+        if signal_duration < total_duration:
+            # Repeat the signal to cover the total_duration
+            repeat_factor = int(np.ceil(total_duration / signal_duration))
+            signal_data = np.tile(signal_data, repeat_factor)[:int(total_duration * 500)]
+        elif signal_duration > total_duration:
+            # Segment the signal to match the total_duration
+            signal_data = signal_data[:int(total_duration * 500)]
+        else:
+            # If the duration exactly matches, use the signal as is
+            signal_data = signal_data
 
-            self.plot_signal(signal_type, start_time, stop_time)
+        # Generate time array for the x-axis
+        t = np.linspace(start_time, stop_time, len(signal_data))
 
+        # Clear the current plot and plot the new signal
+        self.axes.clear()
+        # Set spine color and customize appearance
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+        self.axes.spines['bottom'].set_color(spine_color)
+        self.axes.spines['top'].set_color(spine_color)
+        self.axes.spines['right'].set_color(spine_color)
+        self.axes.spines['left'].set_color(spine_color)
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
+        self.axes.plot(t, signal_data, color=spine_color)  # Customize plot color if needed
+        self.draw()
 
 
+
+    def generate_signal_data(self, signal_type, parameters):
+        # Generate the signal data based on the type and modified parameters
+        
+        if signal_type == "Sine":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
+        elif signal_type == "Square":
+            t = np.linspace(0, 1, 500)
+            return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
+        elif signal_type == "Saw":
+            t = np.linspace(0, 1, 500)
+            return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
+        elif signal_type == "Triangle":
+            t = np.linspace(0, 1, 500)
+            return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
+        elif signal_type == "Chirp":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
+        elif signal_type == "FM":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
+        elif signal_type == "PWM":
+            t = np.linspace(0, 1, 500)
+            return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
+        elif signal_type == "Noise":
+            t = np.linspace(0, 1, 500)
+            return np.random.normal(0, 1, len(t)).tolist()
+        elif signal_type == "Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
+        elif signal_type == "Keyed Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
+        elif signal_type == "ASR":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
+                                [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
+        elif signal_type == "ADSR":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
+                                [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
+                                lambda t: parameters["amplitude"] * (1 - 5 * (t - 0.1 * duration) / duration),
+                                0.5 * parameters["amplitude"],
+                                lambda t: 0.5 * parameters["amplitude"] - 0.25 * parameters["amplitude"] * (t - 0.5 * duration) / duration,
+                                0.25 * parameters["amplitude"]]).tolist()
+        elif signal_type == "Exponential Decay":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
+        elif signal_type == "PolyBezier":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
+        elif signal_type == "Signal Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
+        return np.zeros_like(t).tolist()
+
+    def get_signal_data(self, signal_type):
+        # Retrieve signal data based on signal_type
+        if signal_type in self.app_reference.custom_signals:
+            return self.app_reference.custom_signals[signal_type]["data"]
+        elif signal_type in self.app_reference.imported_signals:
+            return self.app_reference.imported_signals[signal_type]["data"]
+        return None
 
     def show_time_input_dialog(self, signal_type):
         dialog = TimeInputDialog(signal_type)
@@ -1719,77 +1628,6 @@ class TimelineCanvas(FigureCanvas):
             return start_time, stop_time
         return None, None
 
-    def get_signal_data(self, signal_type):
-        # Retrieve signal data based on signal_type
-        if signal_type in self.app_reference.custom_signals:
-            signal_data = self.app_reference.custom_signals[signal_type]["data"]
-        elif signal_type in self.app_reference.signal_templates:
-            signal_data = self.app_reference.signal_templates[signal_type]["data"]
-        elif signal_type in self.app_reference.imported_signals:
-            signal_data = self.app_reference.imported_signals[signal_type]["data"]
-        else:
-            signal_data = None
-        return signal_data
-
-    def show_time_input_dialog(self, signal_type):
-        while True:
-            dialog = TimeInputDialog(signal_type)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                start_time = dialog.start_time_input.value()
-                stop_time = dialog.stop_time_input.value()
-                if start_time >= stop_time:
-                    msg_box = QMessageBox(self)
-                    msg_box.setWindowTitle("Invalid Time Range")
-                    msg_box.setText("Start time must be smaller than stop time.")
-                    msg_box.setIcon(QMessageBox.Icon.Warning)
-                    
-                    # Set the background to black, text to white, and button style
-                    msg_box.setStyleSheet("""
-                        QMessageBox { background-color: white; }
-                        QLabel { color: black; }
-                        QPushButton { 
-                            background-color: white; 
-                            color: black; 
-                            border: 1px solid black; 
-                            padding: 5px; 
-                        }
-                        QPushButton:hover { 
-                            background-color: gray; 
-                        }
-                    """)
-                    msg_box.exec()
-                else:
-                    return start_time, stop_time
-            else:
-                return None, None
-    
-    def remove_data_beyond_time(self, total_time):
-        total_points = 500
-        t = np.linspace(0, self.app_reference.total_time, total_points)
-
-        # Find the index where the time exceeds the new total_time
-        cut_off_index = int((total_time / self.app_reference.total_time) * total_points)
-
-        # Set the y-data beyond this index to zero
-        if hasattr(self, 'y_data'):
-            self.y_data[cut_off_index:] = 0
-            self.axes.clear()
-            self.axes.plot(t, self.y_data)
-            self.draw()
-
-    def add_zero_signal_for_new_range(self, old_total_time, new_total_time):
-        total_points = 500
-        t = np.linspace(0, self.app_reference.total_time, total_points)
-        
-        if hasattr(self, 'y_data'):
-            start_index = int((old_total_time / self.app_reference.total_time) * total_points)
-            stop_index = int((new_total_time / self.app_reference.total_time) * total_points)
-            
-            # Extend y_data with zeros
-            self.y_data[start_index:stop_index] = 0
-            self.axes.clear()
-            self.axes.plot(t, self.y_data)
-            self.draw()
 
 class TimeInputDialog(QDialog):
     def __init__(self, signal_type, parent=None):
@@ -1836,8 +1674,6 @@ class CanvasSizeDialog(QDialog):
         button = QPushButton("OK")
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
-
-
         
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -1855,7 +1691,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
 
-        self.ui.pushButton_5.clicked.connect(self.setup_total_time)
         self.statusBar().showMessage("Welcome to Haptics App")
 
         # Add a flag to track the first signal drop
@@ -1968,6 +1803,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add a dictionary to store signals for each actuator
         self.actuator_signals = {}
 
+        # Initialize timeline_canvases as an empty dictionary
+        self.timeline_canvases = {}
+
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
@@ -2002,6 +1840,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
         self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
         self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
+
+        # Store the TimelineCanvas in the dictionary
+        self.timeline_canvases[actuator_id] = self.timeline_canvas
 
         # Retrieve and plot the signal data for this actuator
         if actuator_id in self.actuator_signals:
@@ -2099,106 +1940,24 @@ class Haptics_App(QtWidgets.QMainWindow):
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
-    def setup_total_time(self):
-        msg_box = QInputDialog(self)
-        msg_box.setWindowTitle("Set up total time")
-        msg_box.setLabelText("Enter total time (in seconds):")
-        msg_box.setInputMode(QInputDialog.InputMode.DoubleInput)
-        msg_box.setDoubleDecimals(2)
-        msg_box.setDoubleMinimum(0)
-        if self.total_time is not None:
-            msg_box.setDoubleValue(self.total_time)
 
-        # Set the custom stylesheet
-        msg_box.setStyleSheet("""
-            QInputDialog { background-color: white; }
-            QLabel { color: black; }
-            QPushButton { 
-                background-color: white; 
-                color: black; 
-                border: 1px solid black; 
-                padding: 5px; 
-            }
-            QPushButton:hover { 
-                background-color: gray; 
-            }
-        """)
-
-        if msg_box.exec() == QDialog.DialogCode.Accepted:
-            new_total_time = msg_box.doubleValue()
-
-            if self.total_time is None:
-                # If total_time is None, simply set it to the new value without any checks
-                self.total_time = new_total_time
-            elif new_total_time < self.total_time:
-                # Warn the user about potential data loss
-                warning_box = QMessageBox(self)
-                warning_box.setWindowTitle("Warning")
-                warning_box.setText(f"The setting total time is less than the current total time ({self.total_time}s). "
-                                    "This may cause data loss. Do you still want to proceed?")
-                warning_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                warning_box.setStyleSheet("""
-                    QMessageBox { background-color: white; }
-                    QLabel { color: black; }
-                    QPushButton { 
-                        background-color: white; 
-                        color: black; 
-                        border: 1px solid black; 
-                        padding: 5px; 
-                    }
-                    QPushButton:hover { 
-                        background-color: gray; 
-                    }
-                """)
-                result = warning_box.exec()
-
-                if result == QMessageBox.StandardButton.Yes:
-                    self.total_time = new_total_time
-                    self.remove_data_beyond_total_time()
-                else:
-                    return  # Do nothing if the user clicks 'No'
-
-            elif new_total_time > self.total_time:
-                old_total_time = self.total_time
-                self.total_time = new_total_time
-                self.add_zero_signal_for_new_time_range(old_total_time)
-            else:
-                self.total_time = new_total_time
-
-            self.update_all_timeline_x_axis_limits()  # Update all timeline x-axes
-            self.statusBar().showMessage(f"Total time set to {self.total_time} seconds")
-        else:
-            self.statusBar().showMessage("Total time not set. Please set the total time using the 'Set Total Time' button.")
-
-    def remove_data_beyond_total_time(self):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.remove_data_beyond_time(self.total_time)
-
-    def add_zero_signal_for_new_time_range(self, old_total_time):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.add_zero_signal_for_new_range(old_total_time, self.total_time)
-
-
-    def update_all_timeline_x_axis_limits(self):
-        for _, (timeline_widget, _) in self.timeline_widgets.items():
-            timeline_widget.update_x_axis_limits()
 
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
+        # Convert the color to a suitable format for the stylesheet
         color_rgb = QColor(color).getRgbF()[:3]
-        actuator_widget = TimelineCanvas(parent=self.ui.scrollAreaWidgetContents, color=color_rgb, label=f"{actuator_type} - {new_id}", app_reference=self)
-        
-        # Ensure the same x and y axis labels are used across all timeline widgets
-        actuator_widget.axes.set_xlabel("Time (s)", fontsize=9.5)
-        actuator_widget.axes.set_ylabel("Amplitude", fontsize=9.5)
-        
-        # Optionally, set the x-axis limits if required
-        actuator_widget.axes.set_xlim(0, self.total_time if self.total_time else 10)  # Example: total_time or default to 10 seconds
-        actuator_widget.axes.set_ylim(-1, 1)  # Example: setting y-axis range
-        
+        color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
+
+        # Create a placeholder widget instead of TimelineCanvas
+        actuator_widget = QWidget(parent=self.ui.scrollAreaWidgetContents)
+        actuator_widget.setStyleSheet(color_style)  # Apply the background color
+
+        # Add a simple label to represent the actuator in the timeline area
         actuator_layout = QHBoxLayout(actuator_widget)
         actuator_label = QLabel(f"{actuator_type} - {new_id}")
+        actuator_label.setStyleSheet("color: white;")  # Ensure text is visible
         actuator_layout.addWidget(actuator_label)
         
+        # Add the widget to the timeline layout
         self.timeline_layout.addWidget(actuator_widget)
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
 
@@ -2207,19 +1966,19 @@ class Haptics_App(QtWidgets.QMainWindow):
         if old_actuator_id in self.timeline_widgets:
             actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
             
-            # Update the canvas color
+            # Convert the color to a suitable format for the stylesheet
             color_rgb = QColor(color).getRgbF()[:3]
-            actuator_widget.update_canvas(color=color_rgb, label=f"{actuator_type} - {new_actuator_id}")
+            color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
             
-            # Update the widget background color
-            actuator_widget.setStyleSheet(f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 0);")
+            # Update the widget's background color
+            actuator_widget.setStyleSheet(color_style)
             
-            # Update the label
+            # Update the label text
             actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
             
             # Store the updated reference with the new ID
             self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
-
+            
             # Update the actuator_signals dictionary to reflect the ID change
             if old_actuator_id in self.actuator_signals:
                 self.actuator_signals[new_actuator_id] = self.actuator_signals.pop(old_actuator_id)
@@ -2227,6 +1986,9 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Immediately update the plotter to reflect the changes
             self.update_plotter(new_actuator_id, actuator_type, color)
 
+
+
+   
             
     def remove_actuator_from_timeline(self, actuator_id):
         if actuator_id in self.timeline_widgets:
