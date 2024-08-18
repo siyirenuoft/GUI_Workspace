@@ -1519,7 +1519,7 @@ class TimelineCanvas(FigureCanvas):
                 return True
         return False
 
-    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data):
+    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data, parameters):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Time Range Overlap")
         msg_box.setText(f"The time range overlaps with an existing signal.")
@@ -1531,7 +1531,7 @@ class TimelineCanvas(FigureCanvas):
         msg_box.exec()
 
         if msg_box.clickedButton() == replace_button:
-            self.replace_overlap(new_start_time, new_stop_time, signal_data)
+            self.replace_overlap(new_start_time, new_stop_time, signal_data, signal_type, parameters)
         else:
             # Adjust the previous signal to keep non-overlapping parts
             self.adjust_previous_signals(new_start_time, new_stop_time)
@@ -1540,45 +1540,118 @@ class TimelineCanvas(FigureCanvas):
             start_time, stop_time = self.show_time_input_dialog(signal_type)
             if start_time is not None and stop_time is not None and stop_time > start_time:
                 if self.check_overlap(start_time, stop_time):
-                    self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                    self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
                 else:
                     self.record_signal(signal_type, signal_data, start_time, stop_time, None)
 
-
-    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data):
+    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data, signal_type=None, signal_parameters=None):
         adjusted_signals = []
 
+        # Ensure signal_parameters is a dictionary, even if not provided
+        if signal_parameters is None:
+            signal_parameters = {"frequency": 10.0, "rate": 1.0}  # Default parameters
+
+        # Loop through all existing signals and adjust based on overlap with the new signal
         for signal in self.signals:
             # Case 1: New signal overlaps the end of this signal
             if signal["start_time"] < new_start_time < signal["stop_time"]:
                 if new_stop_time < signal["stop_time"]:
-                    # Trim the end of the original signal and keep the non-overlapping part
+                    # Part before the new signal
+                    signal_part_1 = {
+                        "type": signal["type"],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "start_time": signal["start_time"],
+                        "stop_time": new_start_time,
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part_1)
+
+                    # Add the new signal here
+                    adjusted_signals.append({
+                        "type": signal_type,
+                        "data": new_signal_data,
+                        "start_time": new_start_time,
+                        "stop_time": new_stop_time,
+                        "parameters": signal_parameters
+                    })
+
+                    # Part after the new signal
+                    signal_part_2 = {
+                        "type": signal["type"],
+                        "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
+                        "start_time": new_stop_time,
+                        "stop_time": signal["stop_time"],
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part_2)
+                else:
+                    # Trim the original signal at the start of the new signal
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],  # Correct slicing here
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
                     }
                     adjusted_signals.append(signal_part)
-                else:
-                    # Remove the overlapping portion of the original signal
-                    signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]  # Correct slicing here
-                    adjusted_signals.append(signal)
+
+                    # Add the new signal here
+                    adjusted_signals.append({
+                        "type": signal_type,
+                        "data": new_signal_data,
+                        "start_time": new_start_time,
+                        "stop_time": new_stop_time,
+                        "parameters": signal_parameters
+                    })
 
             # Case 2: New signal overlaps the start of this signal
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 signal_part = {
                     "type": signal["type"],
-                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],  # Adjust start of data
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
                     "start_time": new_stop_time,
                     "stop_time": signal["stop_time"],
                     "parameters": signal["parameters"]
                 }
                 adjusted_signals.append(signal_part)
 
-            # Case 3: New signal completely overlaps this signal, so remove it
+                # Add the new signal here if it hasn't been added yet
+                adjusted_signals.append({
+                    "type": signal_type,
+                    "data": new_signal_data,
+                    "start_time": new_start_time,
+                    "stop_time": new_stop_time,
+                    "parameters": signal_parameters
+                })
+
+            # Case 3: New signal is fully inside this signal
+            elif new_start_time > signal["start_time"] and new_stop_time < signal["stop_time"]:
+                # Split the signal into two parts around the new signal
+                signal_part_1 = {
+                    "type": signal["type"],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                    "start_time": signal["start_time"],
+                    "stop_time": new_start_time,
+                    "parameters": signal["parameters"]
+                }
+                signal_part_2 = {
+                    "type": signal["type"],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
+                    "start_time": new_stop_time,
+                    "stop_time": signal["stop_time"],
+                    "parameters": signal["parameters"]
+                }
+                adjusted_signals.append(signal_part_1)
+                adjusted_signals.append({
+                    "type": signal_type,
+                    "data": new_signal_data,
+                    "start_time": new_start_time,
+                    "stop_time": new_stop_time,
+                    "parameters": signal_parameters
+                })
+                adjusted_signals.append(signal_part_2)
+
+            # Case 4: New signal completely overlaps this signal
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
                 continue  # Skip adding the signal since it is fully overlapped
 
@@ -1586,17 +1659,20 @@ class TimelineCanvas(FigureCanvas):
                 # No overlap, keep the signal as is
                 adjusted_signals.append(signal)
 
-        # Add the new signal to the list
-        adjusted_signals.append({
-            "type": "Sine",  # Ensure you set the correct signal type
-            "data": new_signal_data,  # Properly pass the new signal's data
-            "start_time": new_start_time,
-            "stop_time": new_stop_time,
-            "parameters": {"frequency": 10.0, "rate": 1.0}  # Pass the correct parameters
-        })
+        # Finally, if the new signal hasn't been added yet (due to no overlap), add it
+        if not any(new_start_time == s["start_time"] and new_stop_time == s["stop_time"] for s in adjusted_signals):
+            adjusted_signals.append({
+                "type": signal_type,
+                "data": new_signal_data,
+                "start_time": new_start_time,
+                "stop_time": new_stop_time,
+                "parameters": signal_parameters
+            })
 
+        # Update the signal list and plot the signals
         self.signals = adjusted_signals
-        self.plot_all_signals()  # Replot all the signals after adjustments
+        self.plot_all_signals()
+
 
 
     def adjust_previous_signals(self, new_start_time, new_stop_time):
@@ -1680,7 +1756,7 @@ class TimelineCanvas(FigureCanvas):
                     if start_time is not None and stop_time is not None and stop_time > start_time:
                         signal_data = self.generate_signal_data(signal_type, parameters)
                         if self.check_overlap(start_time, stop_time):
-                            self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                            self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
                         else:
                             self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
 
@@ -1740,7 +1816,14 @@ class TimelineCanvas(FigureCanvas):
             stop_sample = int(signal["stop_time"] * 500)
             signal_duration = stop_sample - start_sample
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            if len(signal["data"]) > 0:
+                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            else:
+                # Handle the case where signal["data"] is empty
+                # You can either skip this signal or generate a default signal.
+                print(f"Warning: signal data is empty for signal {signal['type']}.")
+                signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
+
             combined_signal[start_sample:stop_sample] = signal_data
 
         # Generate time array for the x-axis
