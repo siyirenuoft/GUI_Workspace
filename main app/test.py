@@ -1505,6 +1505,8 @@ class TimelineCanvas(FigureCanvas):
         # After recording the new signal, update the plot
         if self.signals:  # Plot only if signals have been recorded
             self.plot_all_signals()
+        
+        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -1879,11 +1881,10 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.timeline_canvases[actuator_id] = self.timeline_canvas
 
         # Retrieve and plot the signal data for this actuator
+        # Retrieve and plot the signal data for this actuator
         if actuator_id in self.actuator_signals:
-            self.timeline_canvas.y_data = self.actuator_signals[actuator_id]
-            t = np.linspace(0, self.total_time, 500)
-            self.timeline_canvas.axes.plot(t, self.timeline_canvas.y_data, color='white')
-            self.timeline_canvas.draw()
+            self.timeline_canvas.signals = self.actuator_signals[actuator_id]
+            self.timeline_canvas.plot_all_signals()
 
     def switch_to_main_canvas(self):
         # Check if already on MplCanvas, no need to switch if it is
@@ -1958,6 +1959,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             if widget:
                 widget.deleteLater()
         self.timeline_widgets.clear()
+        self.actuator_signals.clear()  # Clear the stored signals
 
     def reset_color_management(self):
         # Reset color management stuff
