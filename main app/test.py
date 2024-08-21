@@ -26,6 +26,9 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QMainWindow, QApplication, QWidget, QVBoxLayout, QPushButton, QGridLayout
 from PyQt6.QtCore import Qt, QTimer, QRect
 from PyQt6.QtGui import QPainter, QPen, QBrush
+from PyQt6.QtWidgets import QMainWindow, QApplication, QWidget, QVBoxLayout, QPushButton, QGridLayout
+from PyQt6.QtCore import Qt, QTimer, QRect
+from PyQt6.QtGui import QPainter, QPen, QBrush
 
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
@@ -1987,6 +1990,30 @@ class FloatingVerticalSlider(QSlider):
 
 
      
+
+class FloatingVerticalSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.setFixedWidth(10)
+        self.setStyleSheet("background-color: gray;")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ensure it doesn't steal focus
+
+    def update_slider_height(self, height):
+        self.setFixedHeight(height)
+
+
+class FloatingVerticalSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.setFixedWidth(10)
+        self.setStyleSheet("background-color: gray;")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ensure it doesn't steal focus
+
+    def update_slider_height(self, height):
+        self.setFixedHeight(height)
+
+
+     
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2117,6 +2144,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Initialize timeline_canvases as an empty dictionary
         self.timeline_canvases = {}
+
 
         # Slider
         # Create a QWidget that acts as a layer for the slider
