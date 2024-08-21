@@ -2211,55 +2211,46 @@ class Haptics_App(QtWidgets.QMainWindow):
         if self.current_actuator == actuator_id:
             self.switch_to_timeline_canvas(actuator_id)  # Update the plotter to reflect changes
 
-    def switch_to_main_canvas(self):
-        # Ensure TimelineCanvas is hidden and removed from the layout
-        if hasattr(self, 'timeline_canvas') and self.timeline_canvas:
-            self.timeline_canvas.hide()  # Hide the TimelineCanvas
-            self.ui.gridLayout.removeWidget(self.timeline_canvas)
-            self.timeline_canvas.setParent(None)
-            del self.timeline_canvas  # Properly delete the timeline canvas
-
-        # Check if MplCanvas is already added to the layout
-        if not self.is_widget_in_layout(self.maincanvas, self.ui.gridLayout):
-            self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
-        self.maincanvas.show()  # Ensure that the MplCanvas is visible
-        self.current_actuator = None  # Reset current actuator tracking
 
     def switch_to_timeline_canvas(self, actuator_id):
-        # Ensure MplCanvas is hidden and removed from the layout
-        if self.is_widget_in_layout(self.maincanvas, self.ui.gridLayout):
-            self.maincanvas.hide()  # Hide the MplCanvas
-            self.ui.gridLayout.removeWidget(self.maincanvas)
-        
+        # Clear the current layout
+        self.ui.gridLayout.removeWidget(self.maincanvas)
+        self.maincanvas.setParent(None)  # Detach MplCanvas from its parent
+
         # Create and add the TimelineCanvas
         color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
         self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
         self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
-        self.timeline_canvas.show()  # Ensure that the TimelineCanvas is visible
 
         # Store the TimelineCanvas in the dictionary
         self.timeline_canvases[actuator_id] = self.timeline_canvas
-        self.current_actuator = actuator_id
 
+        # Retrieve and plot the signal data for this actuator
         # Retrieve and plot the signal data for this actuator
         if actuator_id in self.actuator_signals:
             self.timeline_canvas.signals = self.actuator_signals[actuator_id]
             self.timeline_canvas.plot_all_signals()
 
-    def is_widget_in_layout(self, widget, layout):
-        for i in range(layout.count()):
-            if layout.itemAt(i).widget() == widget:
-                return True
-        return False
+    def switch_to_main_canvas(self):
+        # Check if already on MplCanvas, no need to switch if it is
+        if self.ui.gridLayout.indexOf(self.maincanvas) != -1:
+            return
+
+        # Remove the current widget (TimelineCanvas)
+        if hasattr(self, 'timeline_canvas'):
+            self.ui.gridLayout.removeWidget(self.timeline_canvas)
+            self.timeline_canvas.setParent(None)
+
+        # Add the MplCanvas back to the layout
+        self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
+        self.current_actuator = None  # Reset current actuator tracking
 
     def mousePressEvent(self, event):
-        # Check if clicked on blank space in the actuator canvas and no actuator is selected
+        # If clicked on blank space, switch back to MplCanvas
         if self.current_actuator and not self.actuator_canvas.itemAt(event.pos()):
             self.current_actuator = None
             self.switch_to_main_canvas()
-        else:
-            super().mousePressEvent(event)
-
+        super().mousePressEvent(event)
 
     def update_status_bar(self, signal_type, parameters):
         # Format the parameters into a readable string
