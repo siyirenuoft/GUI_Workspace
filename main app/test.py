@@ -1056,6 +1056,7 @@ class TimelineCanvas(FigureCanvas):
 
         self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
         self.app_reference.update_actuator_text()
+        self.app_reference.update_pushButton_5_state()
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -2019,6 +2020,7 @@ class ActuatorCanvas(QGraphicsView):
 
         # Redraw all lines after deletion
         self.redraw_all_lines()
+        self.haptics_app.update_pushButton_5_state()
 
     # def ensure_unique_connections(self):
     #     """Ensure all actuators have unique predecessors and successors."""
@@ -2088,6 +2090,7 @@ class ActuatorCanvas(QGraphicsView):
             actuator.update()
 
         self.update()
+        self.haptics_app.update_pushButton_5_state() # Update play button 
     
     def clear_canvas(self):
         for actuator in self.actuators:
@@ -2096,6 +2099,7 @@ class ActuatorCanvas(QGraphicsView):
         self.branch_colors.clear()
         self.actuator_size = 20  # Reset to default size
         self.update_canvas_visuals()
+        self.haptics_app.update_pushButton_5_state() # Update play button
 
     def clear_lines_except_scale(self):
         # Remove all lines and arrows except the scale line and scale text
@@ -2294,7 +2298,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_timer.timeout.connect(self.move_slider)
 
         # Variables to control the movement
-        self.slider_moving = False
+        #self.slider_moving = False
         self.slider_step = 1  # Adjust this value to control the speed of movement
         self.slider_target_pos = 0
 
@@ -2307,6 +2311,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
         # Check if any actuator has signals
         has_signals = any(self.actuator_signals.values())
+        # print("HAHA", self.actuator_signals)
 
         if has_signals:
             self.pushButton_5.setEnabled(True)
@@ -2314,6 +2319,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             self.pushButton_5.setEnabled(False)
             self.slider_target_pos = 0  # No movement target
+
 
     def update_slider_target_position(self):
         """Update the target position for the slider based on the maximum stop time."""
@@ -2324,7 +2330,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         )
 
         # Calculate the target position of the slider based on the maximum stop time
-        self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() * (max_stop_time / self.total_time))
+        if (max_stop_time != None) and (self.total_time != None):
+            self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() * (max_stop_time / self.total_time))
 
     def start_slider_movement(self):
         """Start moving the slider from its current position to the target position."""
@@ -2486,6 +2493,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         if actuator:
             actuator.signal_handler.clicked.connect(self.on_actuator_clicked)
             actuator.signal_handler.properties_changed.connect(self.update_plotter)
+            
 
 
     def update_plotter(self, actuator_id, actuator_type, color):
