@@ -585,6 +585,699 @@ def generate_contrasting_color(existing_colors):
         if contrast:
             return new_color
 
+
+class ActuatorPropertiesDialog(QDialog):
+    def __init__(self, actuator, parent=None):
+        super().__init__(parent)
+        self.actuator = actuator
+        self.setWindowTitle("Actuator Properties")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.id_input = QLineEdit(actuator.id)
+        form_layout.addRow("ID:", self.id_input)
+
+        type_layout = QHBoxLayout()
+        self.type_group = QButtonGroup(self)
+        self.lra_radio = QRadioButton("LRA")
+        self.vca_radio = QRadioButton("VCA")
+        self.m_radio = QRadioButton("M")
+        self.type_group.addButton(self.lra_radio)
+        self.type_group.addButton(self.vca_radio)
+        self.type_group.addButton(self.m_radio)
+        type_layout.addWidget(self.lra_radio)
+        type_layout.addWidget(self.vca_radio)
+        type_layout.addWidget(self.m_radio)
+        form_layout.addRow("Type:", type_layout)
+
+        self.predecessor_input = QLineEdit(actuator.predecessor or "")
+        self.successor_input = QLineEdit(actuator.successor or "")
+        form_layout.addRow("Predecessor:", self.predecessor_input)
+        form_layout.addRow("Successor:", self.successor_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
+
+        self.set_initial_type()
+
+    def set_initial_type(self):
+        if self.actuator.actuator_type == "LRA":
+            self.lra_radio.setChecked(True)
+        elif self.actuator.actuator_type == "VCA":
+            self.vca_radio.setChecked(True)
+        else:
+            self.m_radio.setChecked(True)
+
+    def get_type(self):
+        if self.lra_radio.isChecked():
+            return "LRA"
+        elif self.vca_radio.isChecked():
+            return "VCA"
+        else:
+            return "M"
+
+class SelectionBar(QGraphicsItem):
+    def __init__(self, scene, parent=None):
+        super().__init__()
+        self.setPos(10, 10)  # Default location in the top left corner
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.selection_icons = []
+        self.scene = scene
+        self.create_selection_icons()
+
+    def create_selection_icons(self):
+        actuator_types = ["LRA", "VCA", "M"]
+        for i, act_type in enumerate(actuator_types):
+            icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
+            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
+            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+            icon.setPos(i*30 ,0)
+            icon.setPos(-100, i * 30)
+            icon.adjust_font_size(0.3, 6, 12)  # Adjust font size here
+            self.selection_icons.append(icon)
+            self.scene.addItem(icon)
+
+class SelectionBarView(QGraphicsView):
+    def __init__(self, scene, parent=None):
+        super().__init__(parent)
+        self.setScene(scene)
+        self.setRenderHints(QPainter.RenderHint.Antialiasing)
+        self.setFixedSize(100, 100)  # Adjust size as needed
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.pos())
+        if isinstance(item, Actuator):
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setText(item.actuator_type)
+            drag.setMimeData(mime_data)
+            drag.exec(Qt.DropAction.CopyAction)
+        super().mousePressEvent(event)
+
+class ActuatorPropertiesDialog(QDialog):
+    def __init__(self, actuator, parent=None):
+        super().__init__(parent)
+        self.actuator = actuator
+        self.setWindowTitle("Actuator Properties")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.id_input = QLineEdit(actuator.id)
+        form_layout.addRow("ID:", self.id_input)
+
+        type_layout = QHBoxLayout()
+        self.type_group = QButtonGroup(self)
+        self.lra_radio = QRadioButton("LRA")
+        self.vca_radio = QRadioButton("VCA")
+        self.m_radio = QRadioButton("M")
+        self.type_group.addButton(self.lra_radio)
+        self.type_group.addButton(self.vca_radio)
+        self.type_group.addButton(self.m_radio)
+        type_layout.addWidget(self.lra_radio)
+        type_layout.addWidget(self.vca_radio)
+        type_layout.addWidget(self.m_radio)
+        form_layout.addRow("Type:", type_layout)
+
+        self.predecessor_input = QLineEdit(actuator.predecessor or "")
+        self.successor_input = QLineEdit(actuator.successor or "")
+        form_layout.addRow("Predecessor:", self.predecessor_input)
+        form_layout.addRow("Successor:", self.successor_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
+
+        self.set_initial_type()
+
+    def set_initial_type(self):
+        if self.actuator.actuator_type == "LRA":
+            self.lra_radio.setChecked(True)
+        elif self.actuator.actuator_type == "VCA":
+            self.vca_radio.setChecked(True)
+        else:
+            self.m_radio.setChecked(True)
+
+    def get_type(self):
+        if self.lra_radio.isChecked():
+            return "LRA"
+        elif self.vca_radio.isChecked():
+            return "VCA"
+        else:
+            return "M"
+
+class CreateBranchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Actuator Branch")
+        layout = QVBoxLayout(self)
+
+        self.num_actuators_input = QSpinBox()
+        self.num_actuators_input.setMinimum(1)
+        self.num_actuators_input.valueChanged.connect(self.update_max_counts)
+        layout.addWidget(QLabel("Number of Actuators:"))
+        layout.addWidget(self.num_actuators_input)
+
+        self.lra_input = QSpinBox()
+        self.lra_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("LRA Count:"))
+        layout.addWidget(self.lra_input)
+
+        self.vca_input = QSpinBox()
+        self.vca_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("VCA Count:"))
+        layout.addWidget(self.vca_input)
+
+        self.m_input = QSpinBox()
+        self.m_input.valueChanged.connect(self.check_total)
+        layout.addWidget(QLabel("M Count:"))
+        layout.addWidget(self.m_input)
+
+        self.grid_pattern_input = QLineEdit()
+        self.grid_pattern_input.textChanged.connect(self.validate_inputs)
+        layout.addWidget(QLabel("Grid Pattern (e.g., 2x2, 3x3):"))
+        layout.addWidget(self.grid_pattern_input)
+
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+        self.num_actuators_input.setValue(1)
+        self.update_max_counts()
+        self.validate_inputs()
+
+    def update_max_counts(self):
+        total = self.num_actuators_input.value()
+        self.lra_input.setMaximum(total)
+        self.vca_input.setMaximum(total)
+        self.m_input.setMaximum(total)
+        self.check_total()
+        self.validate_inputs()
+
+    def check_total(self):
+        total = self.num_actuators_input.value()
+        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+        
+        if sum_counts > total:
+            diff = sum_counts - total
+            if self.sender() == self.lra_input:
+                self.lra_input.setValue(max(0, self.lra_input.value() - diff))
+            elif self.sender() == self.vca_input:
+                self.vca_input.setValue(max(0, self.vca_input.value() - diff))
+            elif self.sender() == self.m_input:
+                self.m_input.setValue(max(0, self.m_input.value() - diff))
+            
+            # Recalculate sum_counts after adjustment
+            sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+
+        self.validate_inputs()
+
+    def accept(self):
+        if (self.lra_input.value() + self.vca_input.value() + self.m_input.value() == self.num_actuators_input.value() and
+            self.validate_grid_pattern(self.grid_pattern_input.text())):
+            super().accept()
+
+    def validate_grid_pattern(self, pattern):
+        if not pattern.strip():  # Allow empty pattern
+            return True
+        try:
+            rows, cols = map(int, pattern.split('x'))
+            return rows > 0 and cols > 0  # Just check if it's a valid grid format
+        except ValueError:
+            return False
+        
+    def validate_inputs(self):
+        total = self.num_actuators_input.value()
+        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
+        grid_pattern = self.grid_pattern_input.text().strip()
+        
+        counts_valid = sum_counts == total
+        grid_valid = self.validate_grid_pattern(grid_pattern)
+        
+        is_valid = counts_valid and grid_valid
+        
+        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
+
+class TimelineCanvas(FigureCanvas):
+
+    def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
+        self.app_reference = app_reference  # Reference to Haptics_App
+        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
+        self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
+        self.axes.set_facecolor(color)
+        
+        # Set spine color and customize appearance
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+        self.axes.spines['bottom'].set_color(spine_color)
+        self.axes.spines['top'].set_color(spine_color)
+        self.axes.spines['right'].set_color(spine_color)
+        self.axes.spines['left'].set_color(spine_color)
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
+        
+        super(TimelineCanvas, self).__init__(self.fig)
+        self.setParent(parent)
+        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
+        self.setAcceptDrops(True)
+        
+        self.signals = []  # List to store each signal's data along with their parameters
+
+        # Variables to track dragging
+        self._dragging = False
+        self._last_mouse_x = None
+
+        # dragggg
+        self.signal_duration = 0  # Store the signal duration
+
+    # dragggg
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
+            self._dragging = True
+            self._last_mouse_x = event.position().x()
+    # dragggg
+    def mouseMoveEvent(self, event):
+        if self._dragging and self.signal_duration > 10:
+            dx = event.position().x() - self._last_mouse_x
+            self._last_mouse_x = event.position().x()
+            xmin, xmax = self.axes.get_xlim()
+            delta_x = dx * (xmax - xmin) / self.fig.get_size_inches()[0] / self.fig.dpi
+            # Limit dragging to the signal duration
+            if xmin - delta_x >= 0 and xmax - delta_x <= self.signal_duration:
+                self.axes.set_xlim(xmin - delta_x, xmax - delta_x)
+                self.draw()
+    # dragggg
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+
+    def check_overlap(self, new_start_time, new_stop_time):
+        for signal in self.signals:
+            if not (new_stop_time <= signal["start_time"] or new_start_time >= signal["stop_time"]):
+                return True
+        return False
+
+    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data, parameters):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Time Range Overlap")
+        msg_box.setText(f"The time range overlaps with an existing signal.")
+        msg_box.setInformativeText("Would you like to replace the overlapping region or reset the time range of the new signal?")
+
+        replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
+        reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
+
+        msg_box.exec()
+
+        if msg_box.clickedButton() == replace_button:
+            self.replace_overlap(new_start_time, new_stop_time, signal_data, signal_type, parameters)
+        else:
+            # Adjust the previous signal to keep non-overlapping parts
+            self.adjust_previous_signals(new_start_time, new_stop_time)
+
+            # Prompt the user to set a new time range for the new signal
+            start_time, stop_time = self.show_time_input_dialog(signal_type)
+            if start_time is not None and stop_time is not None and stop_time > start_time:
+                if self.check_overlap(start_time, stop_time):
+                    self.handle_overlap(start_time, stop_time, signal_type, signal_data)
+                else:
+                    self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+
+
+    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data, new_signal_type, new_signal_parameters):
+        adjusted_signals = []
+
+        for signal in self.signals:
+            if signal["start_time"] < new_start_time < signal["stop_time"]:
+                # Case: The new signal overlaps the end of this signal
+                if new_stop_time < signal["stop_time"]:
+                    # Trim the end of the original signal and keep the non-overlapping part
+                    signal_part = {
+                        "type": signal["type"],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "start_time": signal["start_time"],
+                        "stop_time": new_start_time,
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part)
+                else:
+                    # Remove the overlapping portion of the original signal
+                    signal["stop_time"] = new_start_time
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    adjusted_signals.append(signal)
+
+            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
+                # Case: The new signal overlaps the start of this signal
+                signal["start_time"] = new_stop_time
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                adjusted_signals.append(signal)
+
+            elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
+                # Case: The new signal completely overlaps this signal, so the original signal is removed
+
+                continue
+            else:
+                # No overlap, keep the signal as is
+                adjusted_signals.append(signal)
+
+        # Add the new signal as well
+        adjusted_signals.append({
+            "type": new_signal_type,
+            "data": new_signal_data,
+            "start_time": new_start_time,
+            "stop_time": new_stop_time,
+            "parameters": new_signal_parameters
+        })
+
+        print(adjusted_signals)
+
+        self.signals = adjusted_signals
+        self.plot_all_signals()  # Update the plot with the modified signals
+
+
+    def adjust_previous_signals(self, new_start_time, new_stop_time):
+        adjusted_signals = []
+        for signal in self.signals:
+            if signal["start_time"] < new_start_time < signal["stop_time"]:
+                # Case: The new signal overlaps the end of this signal
+                if new_stop_time < signal["stop_time"]:
+                    # Trim the end of the original signal and keep the non-overlapping part
+                    signal_part = {
+                        "type": signal["type"],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "start_time": signal["start_time"],
+                        "stop_time": new_start_time,
+                        "parameters": signal["parameters"]
+                    }
+                    adjusted_signals.append(signal_part)
+                else:
+                    # Remove the overlapping portion of the original signal
+                    signal["stop_time"] = new_start_time
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    adjusted_signals.append(signal)
+            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
+                # Case: The new signal overlaps the start of this signal
+                signal["start_time"] = new_stop_time
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                adjusted_signals.append(signal)
+            elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
+                # Case: The new signal completely overlaps this signal
+                signal_part1 = {
+                    "type": signal["type"],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                    "start_time": signal["start_time"],
+                    "stop_time": new_start_time,
+                    "parameters": signal["parameters"]
+                }
+                signal_part2 = {
+                    "type": signal["type"],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
+                    "start_time": new_stop_time,
+                    "stop_time": signal["stop_time"],
+                    "parameters": signal["parameters"]
+                }
+                adjusted_signals.extend([signal_part1, signal_part2])
+            else:
+                # No overlap, keep the signal as is
+                adjusted_signals.append(signal)
+
+        self.signals = adjusted_signals
+
+
+    def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
+        self.axes.set_xlabel('')  # Remove default xlabel
+        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize, color=color, ha='left', va='center')
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        # Get the dragged signal type
+        item = event.source().selectedItems()[0]
+        signal_type = item.text(0)
+
+        # Determine if the signal is customized or imported
+        if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
+            signal_data = self.get_signal_data(signal_type)
+            if signal_data:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    if self.check_overlap(start_time, stop_time):
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                    else:
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+        else:
+            parameters = self.prompt_signal_parameters(signal_type)
+            if parameters is not None:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    signal_data = self.generate_signal_data(signal_type, parameters)
+                    if self.check_overlap(start_time, stop_time):
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                    else:
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
+
+        # After recording the new signal, update the plot
+        if self.signals:
+            self.plot_all_signals()
+
+        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
+        self.app_reference.update_actuator_text()
+
+
+    def prompt_signal_parameters(self, signal_type):
+        # This method prompts the user to modify the signal parameters using a dialog.
+        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+            dialog = OscillatorDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                return dialog.get_config()
+        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+            dialog = EnvelopeDialog(signal_type, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                return dialog.get_config()
+        return None
+
+    def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
+        # Record the signal data and its parameters into the signals list
+        self.signals.append({
+            "type": signal_type,
+            "data": signal_data,
+            "start_time": start_time,
+            "stop_time": stop_time,
+            "parameters": parameters
+        })
+
+    def plot_all_signals(self):
+        if not self.signals:
+            # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
+            default_duration = 10  # seconds
+            t = np.linspace(0, default_duration, 500 * default_duration)
+            signal_data = np.zeros_like(t)
+            self.plot_signal_data(t, signal_data)
+            return
+
+        # Determine the max stop time across all recorded signals
+        max_stop_time = max([signal["stop_time"] for signal in self.signals])
+
+        # dragggg
+        # Store the signal duration for use in dragging functionality
+        self.signal_duration = max_stop_time
+
+        # Initialize an empty array of zeros for the full duration
+        total_samples = int(max_stop_time * 500)
+        combined_signal = np.zeros(total_samples)
+
+        # Fill in the combined signal with each recorded signal's data
+        for signal in self.signals:
+            start_sample = int(signal["start_time"] * 500)
+            stop_sample = int(signal["stop_time"] * 500)
+            signal_duration = stop_sample - start_sample
+            # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
+            if len(signal["data"]) > 0:
+                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            else:
+                # Handle the case where signal["data"] is empty
+                # You can either skip this signal or generate a default signal.
+                print(f"Warning: signal data is empty for signal {signal['type']}.")
+                signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
+
+            combined_signal[start_sample:stop_sample] = signal_data
+
+        # Generate time array for the x-axis
+        t = np.linspace(0, max_stop_time, total_samples)
+        self.plot_signal_data(t, combined_signal)
+
+    def plot_signal_data(self, t, signal_data):
+        # Clear the current plot and plot the new signal
+        self.axes.clear()
+        # Set spine color and customize appearance
+        spine_color = to_rgba((240/255, 235/255, 229/255))
+        self.axes.spines['bottom'].set_color(spine_color)
+        self.axes.spines['top'].set_color(spine_color)
+        self.axes.spines['right'].set_color(spine_color)
+        self.axes.spines['left'].set_color(spine_color)
+        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
+        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
+        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
+        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
+
+        # Plot the signal data
+        self.axes.plot(t, signal_data, color=spine_color)
+
+        # dragggg
+        # Check if the signal is longer than 10 seconds
+        if self.signal_duration > 10:
+            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
+      
+
+        self.draw()
+
+    def generate_signal_data(self, signal_type, parameters):
+        # Generate the signal data based on the type and modified parameters
+        
+        if signal_type == "Sine":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
+        elif signal_type == "Square":
+            t = np.linspace(0, 1, 500)
+            return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
+        elif signal_type == "Saw":
+            t = np.linspace(0, 1, 500)
+            return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
+        elif signal_type == "Triangle":
+            t = np.linspace(0, 1, 500)
+            return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
+        elif signal_type == "Chirp":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
+        elif signal_type == "FM":
+            t = np.linspace(0, 1, 500)
+            return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
+        elif signal_type == "PWM":
+            t = np.linspace(0, 1, 500)
+            return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
+        elif signal_type == "Noise":
+            t = np.linspace(0, 1, 500)
+            return np.random.normal(0, 1, len(t)).tolist()
+        elif signal_type == "Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
+        elif signal_type == "Keyed Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
+        elif signal_type == "ASR":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
+                                [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
+        elif signal_type == "ADSR":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
+                                [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
+                                lambda t: parameters["amplitude"] * (1 - 5 * (t - 0.1 * duration) / duration),
+                                0.5 * parameters["amplitude"],
+                                lambda t: 0.5 * parameters["amplitude"] - 0.25 * parameters["amplitude"] * (t - 0.5 * duration) / duration,
+                                0.25 * parameters["amplitude"]]).tolist()
+        elif signal_type == "Exponential Decay":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
+        elif signal_type == "PolyBezier":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
+        elif signal_type == "Signal Envelope":
+            duration = parameters["duration"]
+            num_samples = int(duration * 500)
+            t = np.linspace(0, duration, num_samples)
+            return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
+        return np.zeros_like(t).tolist()
+
+    def get_signal_data(self, signal_type):
+        # Retrieve signal data based on signal_type
+        if signal_type in self.app_reference.custom_signals:
+            return self.app_reference.custom_signals[signal_type]["data"]
+        elif signal_type in self.app_reference.imported_signals:
+            return self.app_reference.imported_signals[signal_type]["data"]
+        return None
+
+    def show_time_input_dialog(self, signal_type):
+        dialog = TimeInputDialog(signal_type)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            start_time = dialog.start_time_input.value()
+            stop_time = dialog.stop_time_input.value()
+            return start_time, stop_time
+        return None, None
+
+
+class TimeInputDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Input Time Range")
+
+        layout = QVBoxLayout(self)
+        
+        signal_label = QLabel(f"Signal Type: {signal_type}")
+        
+        layout.addWidget(signal_label)
+        
+        form_layout = QFormLayout()
+        
+        self.start_time_input = QDoubleSpinBox()
+        self.start_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Start Time (s):", self.start_time_input)
+        
+        self.stop_time_input = QDoubleSpinBox()
+        self.stop_time_input.setRange(0, 1000)  # Adjust range as needed
+        form_layout.addRow("Stop Time (s):", self.stop_time_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+class CanvasSizeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Adjust Canvas Size")
+        self.layout = QVBoxLayout(self)
+
+        form_layout = QFormLayout()
+        self.width_input = QLineEdit()
+        self.height_input = QLineEdit()
+        form_layout.addRow("Width (mm):", self.width_input)
+        form_layout.addRow("Height (mm):", self.height_input)
+
+        self.layout.addLayout(form_layout)
+
+        button = QPushButton("OK")
+        button.clicked.connect(self.accept)
+        self.layout.addWidget(button)
+        
 class ActuatorSignalHandler(QObject):
     clicked = pyqtSignal(str)  # Signal to indicate actuator is clicked
     properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
@@ -773,81 +1466,6 @@ class Actuator(QGraphicsItem):
         self.color = color
         self.update()
         self.signal_handler.properties_changed.emit(self.id, self.actuator_type, self.color.name())
-
-class ActuatorPropertiesDialog(QDialog):
-    def __init__(self, actuator, parent=None):
-        super().__init__(parent)
-        self.actuator = actuator
-        self.setWindowTitle("Actuator Properties")
-        self.layout = QVBoxLayout(self)
-
-        form_layout = QFormLayout()
-        self.id_input = QLineEdit(actuator.id)
-        form_layout.addRow("ID:", self.id_input)
-
-        type_layout = QHBoxLayout()
-        self.type_group = QButtonGroup(self)
-        self.lra_radio = QRadioButton("LRA")
-        self.vca_radio = QRadioButton("VCA")
-        self.m_radio = QRadioButton("M")
-        self.type_group.addButton(self.lra_radio)
-        self.type_group.addButton(self.vca_radio)
-        self.type_group.addButton(self.m_radio)
-        type_layout.addWidget(self.lra_radio)
-        type_layout.addWidget(self.vca_radio)
-        type_layout.addWidget(self.m_radio)
-        form_layout.addRow("Type:", type_layout)
-
-        self.predecessor_input = QLineEdit(actuator.predecessor or "")
-        self.successor_input = QLineEdit(actuator.successor or "")
-        form_layout.addRow("Predecessor:", self.predecessor_input)
-        form_layout.addRow("Successor:", self.successor_input)
-
-        self.layout.addLayout(form_layout)
-
-        button = QPushButton("OK")
-        button.clicked.connect(self.accept)
-        self.layout.addWidget(button)
-
-        self.set_initial_type()
-
-    def set_initial_type(self):
-        if self.actuator.actuator_type == "LRA":
-            self.lra_radio.setChecked(True)
-        elif self.actuator.actuator_type == "VCA":
-            self.vca_radio.setChecked(True)
-        else:
-            self.m_radio.setChecked(True)
-
-    def get_type(self):
-        if self.lra_radio.isChecked():
-            return "LRA"
-        elif self.vca_radio.isChecked():
-            return "VCA"
-        else:
-            return "M"
-
-class SelectionBar(QGraphicsItem):
-    def __init__(self, scene, parent=None):
-        super().__init__()
-        self.setPos(10, 10)  # Default location in the top left corner
-        self.setAcceptHoverEvents(True)
-        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        self.selection_icons = []
-        self.scene = scene
-        self.create_selection_icons()
-
-    def create_selection_icons(self):
-        actuator_types = ["LRA", "VCA", "M"]
-        for i, act_type in enumerate(actuator_types):
-            icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
-            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
-            icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
-            icon.setPos(i*30 ,0)
-            icon.setPos(-100, i * 30)
-            icon.adjust_font_size(0.3, 6, 12)  # Adjust font size here
-            self.selection_icons.append(icon)
-            self.scene.addItem(icon)
 
 class ActuatorCanvas(QGraphicsView):
     actuator_added = pyqtSignal(str, str, str, int, int)  # Signal to indicate an actuator is added with its properties
@@ -1489,633 +2107,41 @@ class ActuatorCanvas(QGraphicsView):
             elif isinstance(item, QGraphicsTextItem) and item != self.scale_text:
                 self.scene.removeItem(item)
 
-class SelectionBarView(QGraphicsView):
-    def __init__(self, scene, parent=None):
-        super().__init__(parent)
-        self.setScene(scene)
-        self.setRenderHints(QPainter.RenderHint.Antialiasing)
-        self.setFixedSize(100, 100)  # Adjust size as needed
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setStyleSheet("background: transparent; border: none;")
-        self.setMouseTracking(True)
-
-    def mousePressEvent(self, event):
-        item = self.itemAt(event.pos())
-        if isinstance(item, Actuator):
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setText(item.actuator_type)
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.DropAction.CopyAction)
-        super().mousePressEvent(event)
-
-class ActuatorPropertiesDialog(QDialog):
-    def __init__(self, actuator, parent=None):
-        super().__init__(parent)
-        self.actuator = actuator
-        self.setWindowTitle("Actuator Properties")
-        self.layout = QVBoxLayout(self)
-
-        form_layout = QFormLayout()
-        self.id_input = QLineEdit(actuator.id)
-        form_layout.addRow("ID:", self.id_input)
-
-        type_layout = QHBoxLayout()
-        self.type_group = QButtonGroup(self)
-        self.lra_radio = QRadioButton("LRA")
-        self.vca_radio = QRadioButton("VCA")
-        self.m_radio = QRadioButton("M")
-        self.type_group.addButton(self.lra_radio)
-        self.type_group.addButton(self.vca_radio)
-        self.type_group.addButton(self.m_radio)
-        type_layout.addWidget(self.lra_radio)
-        type_layout.addWidget(self.vca_radio)
-        type_layout.addWidget(self.m_radio)
-        form_layout.addRow("Type:", type_layout)
-
-        self.predecessor_input = QLineEdit(actuator.predecessor or "")
-        self.successor_input = QLineEdit(actuator.successor or "")
-        form_layout.addRow("Predecessor:", self.predecessor_input)
-        form_layout.addRow("Successor:", self.successor_input)
-
-        self.layout.addLayout(form_layout)
-
-        button = QPushButton("OK")
-        button.clicked.connect(self.accept)
-        self.layout.addWidget(button)
-
-        self.set_initial_type()
-
-    def set_initial_type(self):
-        if self.actuator.actuator_type == "LRA":
-            self.lra_radio.setChecked(True)
-        elif self.actuator.actuator_type == "VCA":
-            self.vca_radio.setChecked(True)
-        else:
-            self.m_radio.setChecked(True)
-
-    def get_type(self):
-        if self.lra_radio.isChecked():
-            return "LRA"
-        elif self.vca_radio.isChecked():
-            return "VCA"
-        else:
-            return "M"
-
-class CreateBranchDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Create Actuator Branch")
-        layout = QVBoxLayout(self)
-
-        self.num_actuators_input = QSpinBox()
-        self.num_actuators_input.setMinimum(1)
-        self.num_actuators_input.valueChanged.connect(self.update_max_counts)
-        layout.addWidget(QLabel("Number of Actuators:"))
-        layout.addWidget(self.num_actuators_input)
-
-        self.lra_input = QSpinBox()
-        self.lra_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("LRA Count:"))
-        layout.addWidget(self.lra_input)
-
-        self.vca_input = QSpinBox()
-        self.vca_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("VCA Count:"))
-        layout.addWidget(self.vca_input)
-
-        self.m_input = QSpinBox()
-        self.m_input.valueChanged.connect(self.check_total)
-        layout.addWidget(QLabel("M Count:"))
-        layout.addWidget(self.m_input)
-
-        self.grid_pattern_input = QLineEdit()
-        self.grid_pattern_input.textChanged.connect(self.validate_inputs)
-        layout.addWidget(QLabel("Grid Pattern (e.g., 2x2, 3x3):"))
-        layout.addWidget(self.grid_pattern_input)
-
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
-
-        self.num_actuators_input.setValue(1)
-        self.update_max_counts()
-        self.validate_inputs()
-
-    def update_max_counts(self):
-        total = self.num_actuators_input.value()
-        self.lra_input.setMaximum(total)
-        self.vca_input.setMaximum(total)
-        self.m_input.setMaximum(total)
-        self.check_total()
-        self.validate_inputs()
-
-    def check_total(self):
-        total = self.num_actuators_input.value()
-        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
-        
-        if sum_counts > total:
-            diff = sum_counts - total
-            if self.sender() == self.lra_input:
-                self.lra_input.setValue(max(0, self.lra_input.value() - diff))
-            elif self.sender() == self.vca_input:
-                self.vca_input.setValue(max(0, self.vca_input.value() - diff))
-            elif self.sender() == self.m_input:
-                self.m_input.setValue(max(0, self.m_input.value() - diff))
-            
-            # Recalculate sum_counts after adjustment
-            sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
-
-        self.validate_inputs()
-
-    def accept(self):
-        if (self.lra_input.value() + self.vca_input.value() + self.m_input.value() == self.num_actuators_input.value() and
-            self.validate_grid_pattern(self.grid_pattern_input.text())):
-            super().accept()
-
-    def validate_grid_pattern(self, pattern):
-        if not pattern.strip():  # Allow empty pattern
-            return True
-        try:
-            rows, cols = map(int, pattern.split('x'))
-            return rows > 0 and cols > 0  # Just check if it's a valid grid format
-        except ValueError:
-            return False
-        
-    def validate_inputs(self):
-        total = self.num_actuators_input.value()
-        sum_counts = self.lra_input.value() + self.vca_input.value() + self.m_input.value()
-        grid_pattern = self.grid_pattern_input.text().strip()
-        
-        counts_valid = sum_counts == total
-        grid_valid = self.validate_grid_pattern(grid_pattern)
-        
-        is_valid = counts_valid and grid_valid
-        
-        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
-
-class TimelineCanvas(FigureCanvas):
-
-    def __init__(self, parent=None, width=8, height=2, dpi=100, color=(134/255, 150/255, 167/255), label="", app_reference=None):
-        self.app_reference = app_reference  # Reference to Haptics_App
-        self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
-        self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
-        self.axes.set_facecolor(color)
-        
-        # Set spine color and customize appearance
-        spine_color = to_rgba((240/255, 235/255, 229/255))
-        self.axes.spines['bottom'].set_color(spine_color)
-        self.axes.spines['top'].set_color(spine_color)
-        self.axes.spines['right'].set_color(spine_color)
-        self.axes.spines['left'].set_color(spine_color)
-        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
-        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
-        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
-        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
-        
-        super(TimelineCanvas, self).__init__(self.fig)
-        self.setParent(parent)
-        self.setStyleSheet(f"background-color: rgba({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)}, 0);")
-        self.setAcceptDrops(True)
-        
-        self.signals = []  # List to store each signal's data along with their parameters
-
-        # Variables to track dragging
-        self._dragging = False
-        self._last_mouse_x = None
-
-        # dragggg
-        self.signal_duration = 0  # Store the signal duration
-
-    # dragggg
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
-            self._dragging = True
-            self._last_mouse_x = event.position().x()
-    # dragggg
-    def mouseMoveEvent(self, event):
-        if self._dragging and self.signal_duration > 10:
-            dx = event.position().x() - self._last_mouse_x
-            self._last_mouse_x = event.position().x()
-            xmin, xmax = self.axes.get_xlim()
-            delta_x = dx * (xmax - xmin) / self.fig.get_size_inches()[0] / self.fig.dpi
-            # Limit dragging to the signal duration
-            if xmin - delta_x >= 0 and xmax - delta_x <= self.signal_duration:
-                self.axes.set_xlim(xmin - delta_x, xmax - delta_x)
-                self.draw()
-    # dragggg
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._dragging = False
-
-    def check_overlap(self, new_start_time, new_stop_time):
-        for signal in self.signals:
-            if not (new_stop_time <= signal["start_time"] or new_start_time >= signal["stop_time"]):
-                return True
-        return False
-
-    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data, parameters):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Time Range Overlap")
-        msg_box.setText(f"The time range overlaps with an existing signal.")
-        msg_box.setInformativeText("Would you like to replace the overlapping region or reset the time range of the new signal?")
-
-        replace_button = msg_box.addButton("Replace", QMessageBox.ButtonRole.YesRole)
-        reset_button = msg_box.addButton("Reset", QMessageBox.ButtonRole.NoRole)
-
-        msg_box.exec()
-
-        if msg_box.clickedButton() == replace_button:
-            self.replace_overlap(new_start_time, new_stop_time, signal_data, signal_type, parameters)
-        else:
-            # Adjust the previous signal to keep non-overlapping parts
-            self.adjust_previous_signals(new_start_time, new_stop_time)
-
-            # Prompt the user to set a new time range for the new signal
-            start_time, stop_time = self.show_time_input_dialog(signal_type)
-            if start_time is not None and stop_time is not None and stop_time > start_time:
-                if self.check_overlap(start_time, stop_time):
-                    self.handle_overlap(start_time, stop_time, signal_type, signal_data)
-                else:
-                    self.record_signal(signal_type, signal_data, start_time, stop_time, None)
-
-
-    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data, new_signal_type, new_signal_parameters):
-        adjusted_signals = []
-
-        for signal in self.signals:
-            if signal["start_time"] < new_start_time < signal["stop_time"]:
-                # Case: The new signal overlaps the end of this signal
-                if new_stop_time < signal["stop_time"]:
-                    # Trim the end of the original signal and keep the non-overlapping part
-                    signal_part = {
-                        "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
-                        "start_time": signal["start_time"],
-                        "stop_time": new_start_time,
-                        "parameters": signal["parameters"]
-                    }
-                    adjusted_signals.append(signal_part)
-                else:
-                    # Remove the overlapping portion of the original signal
-                    signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
-                    adjusted_signals.append(signal)
-
-            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
-                # Case: The new signal overlaps the start of this signal
-                signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
-                adjusted_signals.append(signal)
-
-            elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
-                # Case: The new signal completely overlaps this signal, so the original signal is removed
-
-                continue
-            else:
-                # No overlap, keep the signal as is
-                adjusted_signals.append(signal)
-
-        # Add the new signal as well
-        adjusted_signals.append({
-            "type": new_signal_type,
-            "data": new_signal_data,
-            "start_time": new_start_time,
-            "stop_time": new_stop_time,
-            "parameters": new_signal_parameters
-        })
-
-        print(adjusted_signals)
-
-        self.signals = adjusted_signals
-        self.plot_all_signals()  # Update the plot with the modified signals
-
-
-    def adjust_previous_signals(self, new_start_time, new_stop_time):
-        adjusted_signals = []
-        for signal in self.signals:
-            if signal["start_time"] < new_start_time < signal["stop_time"]:
-                # Case: The new signal overlaps the end of this signal
-                if new_stop_time < signal["stop_time"]:
-                    # Trim the end of the original signal and keep the non-overlapping part
-                    signal_part = {
-                        "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
-                        "start_time": signal["start_time"],
-                        "stop_time": new_start_time,
-                        "parameters": signal["parameters"]
-                    }
-                    adjusted_signals.append(signal_part)
-                else:
-                    # Remove the overlapping portion of the original signal
-                    signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
-                    adjusted_signals.append(signal)
-            elif signal["start_time"] < new_stop_time < signal["stop_time"]:
-                # Case: The new signal overlaps the start of this signal
-                signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
-                adjusted_signals.append(signal)
-            elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
-                # Case: The new signal completely overlaps this signal
-                signal_part1 = {
-                    "type": signal["type"],
-                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
-                    "start_time": signal["start_time"],
-                    "stop_time": new_start_time,
-                    "parameters": signal["parameters"]
-                }
-                signal_part2 = {
-                    "type": signal["type"],
-                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
-                    "start_time": new_stop_time,
-                    "stop_time": signal["stop_time"],
-                    "parameters": signal["parameters"]
-                }
-                adjusted_signals.extend([signal_part1, signal_part2])
-            else:
-                # No overlap, keep the signal as is
-                adjusted_signals.append(signal)
-
-        self.signals = adjusted_signals
-
-
-    def set_custom_xlabel(self, xlabel, fontsize=9.5, color='black'):
-        self.axes.set_xlabel('')  # Remove default xlabel
-        self.axes.annotate(xlabel, xy=(1.01, -0.01), xycoords='axes fraction', fontsize=fontsize, color=color, ha='left', va='center')
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        # Get the dragged signal type
-        item = event.source().selectedItems()[0]
-        signal_type = item.text(0)
-
-        # Determine if the signal is customized or imported
-        if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
-            signal_data = self.get_signal_data(signal_type)
-            if signal_data:
-                start_time, stop_time = self.show_time_input_dialog(signal_type)
-                if start_time is not None and stop_time is not None and stop_time > start_time:
-                    if self.check_overlap(start_time, stop_time):
-                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
-                    else:
-                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
-        else:
-            parameters = self.prompt_signal_parameters(signal_type)
-            if parameters is not None:
-                start_time, stop_time = self.show_time_input_dialog(signal_type)
-                if start_time is not None and stop_time is not None and stop_time > start_time:
-                    signal_data = self.generate_signal_data(signal_type, parameters)
-                    if self.check_overlap(start_time, stop_time):
-                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
-                    else:
-                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
-
-        # After recording the new signal, update the plot
-        if self.signals:
-            self.plot_all_signals()
-
-        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
-        self.app_reference.update_actuator_text()
-
-
-    def prompt_signal_parameters(self, signal_type):
-        # This method prompts the user to modify the signal parameters using a dialog.
-        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
-            dialog = OscillatorDialog(signal_type, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                return dialog.get_config()
-        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
-            dialog = EnvelopeDialog(signal_type, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                return dialog.get_config()
-        return None
-
-    def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
-        # Record the signal data and its parameters into the signals list
-        self.signals.append({
-            "type": signal_type,
-            "data": signal_data,
-            "start_time": start_time,
-            "stop_time": stop_time,
-            "parameters": parameters
-        })
-
-    def plot_all_signals(self):
-        if not self.signals:
-            # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
-            default_duration = 10  # seconds
-            t = np.linspace(0, default_duration, 500 * default_duration)
-            signal_data = np.zeros_like(t)
-            self.plot_signal_data(t, signal_data)
-            return
-
-        # Determine the max stop time across all recorded signals
-        max_stop_time = max([signal["stop_time"] for signal in self.signals])
-
-        # dragggg
-        # Store the signal duration for use in dragging functionality
-        self.signal_duration = max_stop_time
-
-        # Initialize an empty array of zeros for the full duration
-        total_samples = int(max_stop_time * 500)
-        combined_signal = np.zeros(total_samples)
-
-        # Fill in the combined signal with each recorded signal's data
-        for signal in self.signals:
-            start_sample = int(signal["start_time"] * 500)
-            stop_sample = int(signal["stop_time"] * 500)
-            signal_duration = stop_sample - start_sample
-            # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            if len(signal["data"]) > 0:
-                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
-            else:
-                # Handle the case where signal["data"] is empty
-                # You can either skip this signal or generate a default signal.
-                print(f"Warning: signal data is empty for signal {signal['type']}.")
-                signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
-
-            combined_signal[start_sample:stop_sample] = signal_data
-
-        # Generate time array for the x-axis
-        t = np.linspace(0, max_stop_time, total_samples)
-        self.plot_signal_data(t, combined_signal)
-
-    def plot_signal_data(self, t, signal_data):
-        # Clear the current plot and plot the new signal
-        self.axes.clear()
-        # Set spine color and customize appearance
-        spine_color = to_rgba((240/255, 235/255, 229/255))
-        self.axes.spines['bottom'].set_color(spine_color)
-        self.axes.spines['top'].set_color(spine_color)
-        self.axes.spines['right'].set_color(spine_color)
-        self.axes.spines['left'].set_color(spine_color)
-        self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)
-        self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)
-        self.axes.set_ylabel('Amplitude', fontsize=9.5, color=spine_color)
-        self.set_custom_xlabel('Time (s)', fontsize=9.5, color=spine_color)
-
-        # Plot the signal data
-        self.axes.plot(t, signal_data, color=spine_color)
-
-        # dragggg
-        # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 10:
-            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
-      
-
-        self.draw()
-
-    def generate_signal_data(self, signal_type, parameters):
-        # Generate the signal data based on the type and modified parameters
-        
-        if signal_type == "Sine":
-            t = np.linspace(0, 1, 500)
-            return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
-        elif signal_type == "Square":
-            t = np.linspace(0, 1, 500)
-            return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
-        elif signal_type == "Saw":
-            t = np.linspace(0, 1, 500)
-            return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
-        elif signal_type == "Triangle":
-            t = np.linspace(0, 1, 500)
-            return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
-        elif signal_type == "Chirp":
-            t = np.linspace(0, 1, 500)
-            return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
-        elif signal_type == "FM":
-            t = np.linspace(0, 1, 500)
-            return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
-        elif signal_type == "PWM":
-            t = np.linspace(0, 1, 500)
-            return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
-        elif signal_type == "Noise":
-            t = np.linspace(0, 1, 500)
-            return np.random.normal(0, 1, len(t)).tolist()
-        elif signal_type == "Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
-        elif signal_type == "Keyed Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
-        elif signal_type == "ASR":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
-        elif signal_type == "ADSR":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
-                                lambda t: parameters["amplitude"] * (1 - 5 * (t - 0.1 * duration) / duration),
-                                0.5 * parameters["amplitude"],
-                                lambda t: 0.5 * parameters["amplitude"] - 0.25 * parameters["amplitude"] * (t - 0.5 * duration) / duration,
-                                0.25 * parameters["amplitude"]]).tolist()
-        elif signal_type == "Exponential Decay":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
-        elif signal_type == "PolyBezier":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
-        elif signal_type == "Signal Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 500)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
-        return np.zeros_like(t).tolist()
-
-    def get_signal_data(self, signal_type):
-        # Retrieve signal data based on signal_type
-        if signal_type in self.app_reference.custom_signals:
-            return self.app_reference.custom_signals[signal_type]["data"]
-        elif signal_type in self.app_reference.imported_signals:
-            return self.app_reference.imported_signals[signal_type]["data"]
-        return None
-
-    def show_time_input_dialog(self, signal_type):
-        dialog = TimeInputDialog(signal_type)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            start_time = dialog.start_time_input.value()
-            stop_time = dialog.stop_time_input.value()
-            return start_time, stop_time
-        return None, None
-
-
-class TimeInputDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Input Time Range")
-
-        layout = QVBoxLayout(self)
-        
-        signal_label = QLabel(f"Signal Type: {signal_type}")
-        
-        layout.addWidget(signal_label)
-        
-        form_layout = QFormLayout()
-        
-        self.start_time_input = QDoubleSpinBox()
-        self.start_time_input.setRange(0, 1000)  # Adjust range as needed
-        form_layout.addRow("Start Time (s):", self.start_time_input)
-        
-        self.stop_time_input = QDoubleSpinBox()
-        self.stop_time_input.setRange(0, 1000)  # Adjust range as needed
-        form_layout.addRow("Stop Time (s):", self.stop_time_input)
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-class CanvasSizeDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Adjust Canvas Size")
-        self.layout = QVBoxLayout(self)
-
-        form_layout = QFormLayout()
-        self.width_input = QLineEdit()
-        self.height_input = QLineEdit()
-        form_layout.addRow("Width (mm):", self.width_input)
-        form_layout.addRow("Height (mm):", self.height_input)
-
-        self.layout.addLayout(form_layout)
-
-        button = QPushButton("OK")
-        button.clicked.connect(self.accept)
-        self.layout.addWidget(button)
-        
 
 class FloatingVerticalSlider(QSlider):
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Vertical, parent)
         self.setFixedWidth(10)
         self.setStyleSheet("background-color: gray;")
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ensure it doesn't steal focus
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
+        self.slider_start_pos = None
 
     def update_slider_height(self, height):
         self.setFixedHeight(height)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.slider_start_pos = event.globalPosition().toPoint()
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self.slider_start_pos is not None:
+            delta_x = event.globalPosition().x() - self.slider_start_pos.x()
+            self.slider_start_pos = event.globalPosition().toPoint()
+
+            new_x = int(self.x() + delta_x)
+            max_x = self.parent().width() - self.width()
+
+            # Keep the slider within bounds
+            if new_x < 0:
+                new_x = 0
+            elif new_x > max_x:
+                new_x = max_x
+
+            # Move the slider
+            self.move(new_x, self.y())
+
+            super().mouseMoveEvent(event)
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -2257,10 +2283,73 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.actionStart_New_Design.triggered.connect(self.design_saver.load_design)
 
 
-        # Slider
+        # Connect the pushButton_5 click to the start_slider_movement method
+        self.pushButton_5.clicked.connect(self.start_slider_movement)
+
+        # Connect the pushButton_5 click to the start_slider_movement method
+        self.pushButton_5.clicked.connect(self.start_slider_movement)
+
+        # Create a QTimer for slider movement
+        self.slider_timer = QTimer()
+        self.slider_timer.timeout.connect(self.move_slider)
+
+        # Variables to control the movement
+        self.slider_moving = False
+        self.slider_step = 1  # Adjust this value to control the speed of movement
+        self.slider_target_pos = 0
+
+        self.setup_slider_layer()
+
+        # Call this method initially to set the state of pushButton_5
+        self.update_pushButton_5_state()
+
+    def update_pushButton_5_state(self):
+        """Update the state of pushButton_5 based on whether any actuators have signals."""
+        # Check if any actuator has signals
+        has_signals = any(self.actuator_signals.values())
+
+        if has_signals:
+            self.pushButton_5.setEnabled(True)
+            self.update_slider_target_position()
+        else:
+            self.pushButton_5.setEnabled(False)
+            self.slider_target_pos = 0  # No movement target
+
+    def update_slider_target_position(self):
+        """Update the target position for the slider based on the maximum stop time."""
+        # Find the maximum stop time across all actuators
+        max_stop_time = max(
+            (signal["stop_time"] for signals in self.actuator_signals.values() for signal in signals),
+            default=0
+        )
+
+        # Calculate the target position of the slider based on the maximum stop time
+        self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() * (max_stop_time / self.total_time))
+
+    def start_slider_movement(self):
+        """Start moving the slider from its current position to the target position."""
+        if self.slider_target_pos > 0:  # Only start if there's a valid target position
+            self.slider_moving = True
+            self.slider_timer.start(10)  # Adjust the interval (in ms) for smoother or faster movement
+
+    def move_slider(self):
+        if self.slider_moving:
+            current_pos = self.floating_slider.x()
+            new_pos = min(current_pos + self.slider_step, self.slider_target_pos)
+
+            # Move the slider to the new position
+            self.floating_slider.move(new_pos, self.floating_slider.y())
+
+            # Stop the timer when the slider reaches the target position
+            if new_pos >= self.slider_target_pos:
+                self.slider_timer.stop()
+                self.slider_moving = False
+
+
+    def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
         self.slider_layer = QWidget(self.ui.scrollAreaWidgetContents)
-        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
         self.slider_layer.setStyleSheet("background: transparent;")
         
@@ -2268,48 +2357,27 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.floating_slider = FloatingVerticalSlider(self.slider_layer)
         self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
 
-        # Raise the slider so it's always on top
-        self.floating_slider.raise_()
+        # Ensure the slider layer and slider are on top
+        self.raise_slider_layer()
 
         # Install an event filter to track resizing and adjust the slider
         self.ui.scrollAreaWidgetContents.installEventFilter(self)
 
-        # Connect mouse events to handle slider dragging
-        self.floating_slider.mousePressEvent = self.slider_mouse_press_event
-        self.floating_slider.mouseMoveEvent = self.slider_mouse_move_event
+    def raise_slider_layer(self):
+        # Raise the slider layer and slider to ensure they are on top
+        self.slider_layer.raise_()
+        self.floating_slider.raise_()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Type.Resize and source is self.ui.scrollAreaWidgetContents:
             # Adjust the slider layer to match the size of the scroll area content
             self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
             self.floating_slider.update_slider_height(self.ui.scrollAreaWidgetContents.height())
+            self.raise_slider_layer()  # Ensure the slider layer stays on top after resizing
         return super(Haptics_App, self).eventFilter(source, event)
 
-    def slider_mouse_press_event(self, event):
-        # Store the initial position when the slider is clicked
-        self.slider_start_pos = event.globalPosition().toPoint()
-        super(QSlider, self.floating_slider).mousePressEvent(event)
-
-    def slider_mouse_move_event(self, event):
-        # Calculate the horizontal movement based on the difference from the start position
-        delta_x = event.globalPosition().x() - self.slider_start_pos.x()
-        self.slider_start_pos = event.globalPosition().toPoint()
-
-        # Update the slider's horizontal position within the timeline layout
-        new_x = int(self.floating_slider.x() + delta_x)
-        max_x = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
-
-        # Ensure the slider stays within bounds
-        if new_x < 0:
-            new_x = 0
-        elif new_x > max_x:
-            new_x = max_x
-
-        # Move the slider to the new position
-        self.floating_slider.move(new_x, self.floating_slider.y())
-        super(QSlider, self.floating_slider).mouseMoveEvent(event)
-
     def update_actuator_text(self):
+        
         # Find the global largest stop time across all actuators
         all_stop_times = []
         for signals in self.actuator_signals.values():
@@ -2395,6 +2463,8 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                     # Add the signal widget to the layout
                     timeline_layout.addWidget(signal_widget)
+                    # Lower the signal widget to the bottom layer
+                    signal_widget.lower()
 
                     # Update the last stop time
                     last_stop_time = signal["stop_time"]
@@ -2404,6 +2474,11 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
+
+        # After adding all timeline widgets, ensure the slider layer stays on top
+        self.raise_slider_layer()
+                
+        
 
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
@@ -2558,6 +2633,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.timeline_layout.addWidget(actuator_widget)
         self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
 
+        self.raise_slider_layer()
+
+
 
     def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
         if old_actuator_id in self.timeline_widgets:
@@ -2585,6 +2663,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
 
 
+
    
             
     def remove_actuator_from_timeline(self, actuator_id):
@@ -2597,6 +2676,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         if actuator_id in self.actuator_signals:
             del self.actuator_signals[actuator_id]
 
+  
 
     def import_waveform(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")

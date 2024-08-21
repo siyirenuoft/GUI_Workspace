@@ -18,6 +18,7 @@ from datetime import date, datetime
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 import json
+import pickle
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
 from PyQt6.QtCore import Qt, pyqtSlot, QPoint
@@ -27,6 +28,109 @@ from PyQt6.QtCore import pyqtSignal
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
+
+class DesignSaver:
+    def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
+        self.actuator_canvas = actuator_canvas
+        self.timeline_canvases = timeline_canvases
+        self.mpl_canvas = mpl_canvas
+        self.app_reference = app_reference
+
+    def save_design(self):
+        file_name, _ = QFileDialog.getSaveFileName(None, "Save As", "", "Design Files (*.dsgn)")
+        if file_name:
+            try:
+                design_data = self.collect_design_data()
+                with open(file_name, 'wb') as file:
+                    pickle.dump(design_data, file)
+                QMessageBox.information(None, "Success", "Design saved successfully!")
+            except Exception as e:
+                QMessageBox.warning(None, "Error", f"Failed to save design: {str(e)}")
+    
+    def load_design(self):
+        file_name, _ = QFileDialog.getOpenFileName(None, "Open Design", "", "Design Files (*.dsgn)")
+        if file_name:
+            try:
+                with open(file_name, 'rb') as file:
+                    design_data = pickle.load(file)
+                self.apply_design_data(design_data)
+                QMessageBox.information(None, "Success", "Design loaded successfully!")
+            except Exception as e:
+                QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
+
+    def collect_design_data(self):
+        # Collect data from Actuator Canvas
+        actuator_data = []
+        for actuator in self.actuator_canvas.actuators:
+            actuator_data.append({
+                'id': actuator.id,
+                'type': actuator.actuator_type,
+                'color': actuator.color.name(),
+                'position': (actuator.pos().x(), actuator.pos().y()),
+                'predecessor': actuator.predecessor,
+                'successor': actuator.successor
+            })
+        
+        # Collect data from Timeline Canvas
+        #print("Timeline Signals:", self.timeline_canvas['signals'])
+        timeline_data = []
+        for actuator_id, timeline_canvas in self.timeline_canvases.items():
+            for signal in timeline_canvas.signals:
+                timeline_data.append({
+                    'actuator_id': actuator_id,  # Include actuator ID to link the signal to its actuator
+                    'type': signal["type"],
+                    'start_time': signal["start_time"],
+                    'stop_time': signal["stop_time"],
+                    'data': signal["data"],
+                    'parameters': signal["parameters"]
+                })
+        
+        # Collect data from MplCanvas (Imported signals)
+        mpl_data = []
+        for signal_name, signal_data in self.app_reference.imported_signals.items():
+            mpl_data.append({
+                'name': signal_name,
+                'data': signal_data
+            })
+        
+        # Combine all data into a dictionary
+        design_data = {
+            'actuators': actuator_data,
+            'timeline': timeline_data,
+            'mpl_signals': mpl_data
+        }
+        return design_data
+
+    def apply_design_data(self, design_data):
+        # Clear existing canvases
+        self.actuator_canvas.clear_canvas()
+        for actuator_id, timeline_canvas in self.timeline_canvases.items():
+            timeline_canvas.signals.clear()
+        self.mpl_canvas.clear_plot()
+        
+        # Restore actuators
+        for actuator_info in design_data['actuators']:
+            x, y = actuator_info['position']
+            self.actuator_canvas.add_actuator(x, y, new_id=actuator_info['id'], 
+                                              actuator_type=actuator_info['type'], 
+                                              predecessor=actuator_info['predecessor'], 
+                                              successor=actuator_info['successor'])
+        
+        # Restore timeline signals
+        for signal_info in design_data['timeline']:
+            # You may need to determine which timeline_canvas this signal belongs to, possibly based on actuator_id
+            corresponding_timeline_canvas = self.timeline_canvases[signal_info['actuator_id']]
+            corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
+                                                        signal_info['start_time'], signal_info['stop_time'], 
+                                                        signal_info['parameters'])
+        
+        # Restore imported signals in MplCanvas
+        for signal_info in design_data['mpl_signals']:
+            self.app_reference.imported_signals[signal_info['name']] = signal_info['data']
+        
+        # Redraw the canvases
+        self.actuator_canvas.redraw_all_lines()
+        self.mpl_canvas.plot([], [])  # Redraw the MplCanvas
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
@@ -822,36 +926,87 @@ class ActuatorCanvas(QGraphicsView):
         arrow_item = self.scene.addPolygon(arrow_head, QPen(Qt.GlobalColor.black), QBrush(Qt.GlobalColor.black))
         arrow_item.setZValue(-1)  # Ensure the arrowhead is behind the actuators
 
-
-
     def redraw_all_lines(self):
-        """Redraw all lines connecting actuators."""
+        """Redraw all lines connecting actuators and check for topology conflicts."""
         # Remove all existing lines and arrowheads except for the scale line and text
         for item in self.scene.items():
             if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)) and item != self.scale_line and item != self.scale_text:
                 self.scene.removeItem(item)
 
-        # Redraw lines based on current actuator positions
+        # Iterate through all actuators and draw lines when both conditions are met
         for actuator in self.actuators:
+            # Check if an actuator's predecessor and successor are the same
+            if (actuator.predecessor == actuator.successor) and (actuator.predecessor is not None):
+                self.generate_same_predecessor_successor_warning(actuator.id)
+                continue  # Skip drawing the line for this actuator
+
+            # Check for topology conflicts
             if actuator.predecessor:
-                predecessor = self.get_actuator_by_id(actuator.predecessor)
-                if predecessor:
-                    line = QLineF(predecessor.pos(), actuator.pos())
-                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
-                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+                predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
+                if predecessor_actuator:
+                    # Check if the predecessor lists the current actuator as its successor
+                    if predecessor_actuator.successor != actuator.id:
+                        self.generate_topology_conflict_warning(actuator.id, predecessor_actuator.id)
+                        continue  # Skip drawing the line if there's a conflict
+                else:
+                    # Predecessor does not exist, issue a warning
+                    print(f"Warning: Actuator {actuator.id} references a non-existent predecessor {actuator.predecessor}.")
+                    continue  # Skip drawing if predecessor is invalid
 
-                    # Draw the arrowhead
-                    self.draw_arrowhead(line)
-
+            # Check if actuator has a successor and if both conditions are satisfied
             if actuator.successor:
-                successor = self.get_actuator_by_id(actuator.successor)
-                if successor:
-                    line = QLineF(actuator.pos(), successor.pos())
+                successor_actuator = self.get_actuator_by_id(actuator.successor)
+                if successor_actuator:
+                    # Check if the successor lists the current actuator as its predecessor
+                    if successor_actuator.predecessor != actuator.id:
+                        self.generate_topology_conflict_warning(actuator.id, successor_actuator.id)
+                        continue  # Skip drawing the line if there's a conflict
+                else:
+                    # Successor does not exist, issue a warning
+                    print(f"Warning: Actuator {actuator.id} references a non-existent successor {actuator.successor}.")
+                    continue  # Skip drawing if successor is invalid
+
+            # Condition to draw the line: Check if both predecessor and successor match the requirements
+            if actuator.predecessor:
+                predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
+                if predecessor_actuator and predecessor_actuator.successor == actuator.id:
+                    # Draw the line from predecessor to current actuator
+                    line = QLineF(predecessor_actuator.pos(), actuator.pos())
                     line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
                     line_item.setZValue(-1)  # Ensure the line is behind the actuators
-
-                    # Draw the arrowhead
                     self.draw_arrowhead(line)
+
+            # Draw the arrow connecting to the successor
+            if actuator.successor:
+                successor_actuator = self.get_actuator_by_id(actuator.successor)
+                if successor_actuator and successor_actuator.predecessor == actuator.id:
+                    line = QLineF(actuator.pos(), successor_actuator.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+                    self.draw_arrowhead(line)
+
+    def generate_topology_conflict_warning(self, actuator_id_1, actuator_id_2):
+        """Generate a warning message for a topology conflict between two actuators."""
+        message = (
+            f"Topology Conflict Detected!<br>"
+            f"Actuator '<b>{actuator_id_1}</b>' claims its successor is '<b>{actuator_id_2}</b>', but "
+            f"'<b>{actuator_id_2}</b>' does not recognize '<b>{actuator_id_1}</b>' as its predecessor.<br>"
+            "Please check the configuration."
+        )
+        QMessageBox.warning(self, "Topology Conflict", message)
+        print(message)  # Optional: Also print the message to the console for debugging
+
+    def generate_same_predecessor_successor_warning(self, actuator_id):
+        """Generate a warning message for an actuator with the same predecessor and successor."""
+        message = (
+            f"Topology Error Detected!<br>"
+            f"Actuator '<b>{actuator_id}</b>' has the <b>same</b> predecessor and successor, which is not allowed.<br>"
+            "Please check the configuration."
+        )
+        QMessageBox.warning(self, "Configuration Error", message)
+        print(message)  # Optional: Also print the message to the console for debugging
+
+
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -874,58 +1029,58 @@ class ActuatorCanvas(QGraphicsView):
                 event.ignore()
 
     def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
+        # Generate a new ID if not provided
         if new_id is None:
             new_id = self.generate_next_id()
         
+        # Determine the branch (e.g., A for A.1)
         branch = new_id.split('.')[0]
         if branch not in self.branch_colors:
-
             if self.color_index < len(COLOR_LIST):
-                print("here",self.color_index)
                 self.branch_colors[branch] = COLOR_LIST[self.color_index]
                 self.color_index += 1
             else:
-                print("here!!!",self.color_index)
                 self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
+
         color = self.branch_colors[branch]
 
+        # Automatically determine predecessor if not provided
         if predecessor is None or successor is None:
             predecessor, successor = self.get_predecessor_successor(new_id)
 
+        # Create and add the new actuator
         actuator = Actuator(x, y, self.actuator_size, color, actuator_type, new_id, predecessor, successor)
         self.scene.addItem(actuator)
         self.actuators.append(actuator)
+        actuator.setZValue(0)  # Ensure actuator is above the lines
 
-        # Set the Z-value of the actuator higher than the lines
-        actuator.setZValue(0)
-
-        # Emit signal when an actuator is added
-        self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
-
-        # Draw an arrow connecting to the predecessor
+        # Update predecessor's successor to the newly added actuator
         if predecessor:
-            for act in self.actuators:
-                if act.id == predecessor:
-                    line = QLineF(act.pos(), actuator.pos())
-                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
-                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+            pred_actuator = self.get_actuator_by_id(predecessor)
+            if pred_actuator:
+                pred_actuator.successor = new_id  # Update the predecessor's successor to the new actuator
+                pred_actuator.update()
 
-                    # Draw the arrowhead
-                    self.draw_arrowhead(line)
-                    break
+                # Draw a line from the predecessor to the newly added actuator
+                line = QLineF(pred_actuator.pos(), actuator.pos())
+                line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                line_item.setZValue(-1)  # Ensure the line is behind the actuators
+                self.draw_arrowhead(line)  # Draw the arrowhead
 
+        # Draw an arrow connecting to the successor (if applicable)
         if successor:
             for act in self.actuators:
                 if act.id == successor:
                     line = QLineF(actuator.pos(), act.pos())
                     line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
                     line_item.setZValue(-1)  # Ensure the line is behind the actuators
-
-                    # Draw the arrowhead
                     self.draw_arrowhead(line)
                     break
 
-        actuator.update()
+        actuator.update()  # Update the new actuator to reflect changes
+
+        # Emit signal indicating the actuator has been added
+        self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
 
 
     def get_actuator_by_id(self, actuator_id):
@@ -1143,6 +1298,18 @@ class ActuatorCanvas(QGraphicsView):
                 old_branch = old_id.split('.')[0]
                 new_branch = new_id.split('.')[0]
                 if old_branch != new_branch:
+                    if actuator.predecessor:
+                        print("pred", actuator.predecessor)
+                        predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
+                        if predecessor_actuator:
+                            predecessor_actuator.successor = None
+                        
+                    if actuator.successor:
+                        print("succ", actuator.successor)
+                        successor_actuator = self.get_actuator_by_id(actuator.successor)
+                        if successor_actuator:
+                            successor_actuator.predecessor = None
+
                     if new_branch not in self.branch_colors:
                         if self.color_index < len(COLOR_LIST):
                             self.branch_colors[new_branch] = COLOR_LIST[self.color_index]
@@ -1166,6 +1333,10 @@ class ActuatorCanvas(QGraphicsView):
                 actuator.successor = dialog.successor_input.text()
                 
                 actuator.size = self.actuator_size  # Use the canvas's actuator size
+                
+                if old_branch != new_branch:
+                    actuator.predecessor = None
+                    actuator.successor = None
                 
                 actuator.update()
                 
@@ -1195,35 +1366,61 @@ class ActuatorCanvas(QGraphicsView):
             act.update()
 
     def remove_actuator(self, actuator):
-        selected_items = self.scene.selectedItems()
+        """Remove an actuator and update its predecessor and successor appropriately."""
+        if actuator.predecessor or actuator.successor:
+            predecessor_actuator = self.get_actuator_by_id(actuator.predecessor) if actuator.predecessor else None
+            successor_actuator = self.get_actuator_by_id(actuator.successor) if actuator.successor else None
 
-        if selected_items:
-            for item in selected_items:
-                if isinstance(item, Actuator):
-                    # Ensure the item is still part of the scene
-                    if item.scene() == self.scene:
-                        matching_actuators = [a for a in self.actuators if a.id == item.id]
-                        if matching_actuators:
-                            self.actuators.remove(matching_actuators[0])
-                        self.scene.removeItem(item)
-                        self.actuator_deleted.emit(item.id)  # Emit the deletion signal
-                        # Remove from plotter immediately
-                        self.haptics_app.remove_actuator_from_timeline(item.id)
-        else:
-            # Ensure the actuator is still part of the scene
-            if actuator.scene() == self.scene:
-                matching_actuators = [a for a in self.actuators if a.id == actuator.id]
-                if matching_actuators:
-                    self.actuators.remove(matching_actuators[0])
-                self.scene.removeItem(actuator)
-                self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
-                # Remove from plotter immediately
-                self.haptics_app.remove_actuator_from_timeline(actuator.id)
+            # Handle the case of A-B-C, where B is being deleted
+            if predecessor_actuator and successor_actuator:
+                # Update A's successor to be C
+                predecessor_actuator.successor = successor_actuator.id
+                predecessor_actuator.update()
 
-        self.redraw_all_lines()  # Trigger a redraw of all lines
+                # Update C's predecessor to be A
+                successor_actuator.predecessor = predecessor_actuator.id
+                successor_actuator.update()
 
+            elif predecessor_actuator:
+                # If there is only a predecessor (no successor), just remove the successor reference from A
+                predecessor_actuator.successor = None
+                predecessor_actuator.update()
 
+            elif successor_actuator:
+                # If there is only a successor (no predecessor), just remove the predecessor reference from C
+                successor_actuator.predecessor = None
+                successor_actuator.update()
 
+        # Ensure that both predecessors and successors are unique after deletion
+        #self.ensure_unique_connections()
+
+        # Remove the actuator from the scene
+        self.actuators.remove(actuator)
+        self.scene.removeItem(actuator)
+        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+
+        # Redraw all lines after deletion
+        self.redraw_all_lines()
+
+    # def ensure_unique_connections(self):
+    #     """Ensure all actuators have unique predecessors and successors."""
+    #     seen_predecessors = set()
+    #     seen_successors = set()
+
+    #     for actuator in self.actuators:
+    #         if actuator.predecessor in seen_predecessors:
+    #             actuator.predecessor = None  # Clear the duplicate predecessor
+    #             actuator.update()
+
+    #         if actuator.successor in seen_successors:
+    #             actuator.successor = None  # Clear the duplicate successor
+    #             actuator.update()
+
+    #         # Track unique predecessors and successors
+    #         if actuator.predecessor:
+    #             seen_predecessors.add(actuator.predecessor)
+    #         if actuator.successor:
+    #             seen_successors.add(actuator.successor)
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -1909,6 +2106,42 @@ class CanvasSizeDialog(QDialog):
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
         
+
+class FloatingVerticalSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.setFixedWidth(10)
+        self.setStyleSheet("background-color: gray;")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
+        self.slider_start_pos = None
+
+    def update_slider_height(self, height):
+        self.setFixedHeight(height)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.slider_start_pos = event.globalPosition().toPoint()
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton and self.slider_start_pos is not None:
+            delta_x = event.globalPosition().x() - self.slider_start_pos.x()
+            self.slider_start_pos = event.globalPosition().toPoint()
+
+            new_x = int(self.x() + delta_x)
+            max_x = self.parent().width() - self.width()
+
+            # Keep the slider within bounds
+            if new_x < 0:
+                new_x = 0
+            elif new_x > max_x:
+                new_x = max_x
+
+            # Move the slider
+            self.move(new_x, self.y())
+
+            super().mouseMoveEvent(event)
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2040,7 +2273,82 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Initialize timeline_canvases as an empty dictionary
         self.timeline_canvases = {}
 
+        # Instantiate DesignSaver
+        self.design_saver = DesignSaver(self.actuator_canvas, self.timeline_canvases, self.maincanvas, self)
+
+        # Connect the "Save As..." action to the save_design method
+        self.ui.actionSave_New_Design.triggered.connect(self.design_saver.save_design)
+
+        self.ui.actionStart_New_Design.triggered.connect(self.design_saver.load_design)
+
+
+        # Connect the pushButton_5 click to the start_slider_movement method
+        self.pushButton_5.clicked.connect(self.start_slider_movement)
+
+        # Create a QTimer for slider movement
+        self.slider_timer = QTimer()
+        self.slider_timer.timeout.connect(self.move_slider)
+
+        # Variables to control the movement
+        self.slider_moving = False
+        self.slider_step = 1  # Adjust this value to control the speed of movement
+        self.slider_target_pos = 0
+
+        self.setup_slider_layer()
+    
+    def start_slider_movement(self):
+        # Calculate the target position (rightmost position)
+        self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
+
+        # Start moving the slider from the current position
+        self.slider_moving = True
+        self.slider_timer.start(10)  # Adjust the interval (in ms) for smoother or faster movement
+
+    def move_slider(self):
+        if self.slider_moving:
+            current_pos = self.floating_slider.x()
+            new_pos = min(current_pos + self.slider_step, self.slider_target_pos)
+
+            # Move the slider to the new position
+            self.floating_slider.move(new_pos, self.floating_slider.y())
+
+            # Stop the timer when the slider reaches the target position
+            if new_pos >= self.slider_target_pos:
+                self.slider_timer.stop()
+                self.slider_moving = False
+
+    def setup_slider_layer(self):
+        # Create a QWidget that acts as a layer for the slider
+        self.slider_layer = QWidget(self.ui.scrollAreaWidgetContents)
+        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+        self.slider_layer.setStyleSheet("background: transparent;")
+        
+        # Add a vertical slider to float over the timeline layout
+        self.floating_slider = FloatingVerticalSlider(self.slider_layer)
+        self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
+
+        # Ensure the slider layer and slider are on top
+        self.raise_slider_layer()
+
+        # Install an event filter to track resizing and adjust the slider
+        self.ui.scrollAreaWidgetContents.installEventFilter(self)
+
+    def raise_slider_layer(self):
+        # Raise the slider layer and slider to ensure they are on top
+        self.slider_layer.raise_()
+        self.floating_slider.raise_()
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Type.Resize and source is self.ui.scrollAreaWidgetContents:
+            # Adjust the slider layer to match the size of the scroll area content
+            self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+            self.floating_slider.update_slider_height(self.ui.scrollAreaWidgetContents.height())
+            self.raise_slider_layer()  # Ensure the slider layer stays on top after resizing
+        return super(Haptics_App, self).eventFilter(source, event)
+
     def update_actuator_text(self):
+        
         # Find the global largest stop time across all actuators
         all_stop_times = []
         for signals in self.actuator_signals.values():
@@ -2126,6 +2434,8 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                     # Add the signal widget to the layout
                     timeline_layout.addWidget(signal_widget)
+                    # Lower the signal widget to the bottom layer
+                    signal_widget.lower()
 
                     # Update the last stop time
                     last_stop_time = signal["stop_time"]
@@ -2136,24 +2446,17 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
 
+        # After adding all timeline widgets, ensure the slider layer stays on top
+        self.raise_slider_layer()
+                
+        
+
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
         if actuator:
             actuator.signal_handler.clicked.connect(self.on_actuator_clicked)
             actuator.signal_handler.properties_changed.connect(self.update_plotter)
-
-
-    def on_actuator_clicked(self, actuator_id):
-        # When an actuator is clicked, switch to the TimelineCanvas
-        if self.current_actuator != actuator_id:
-            self.current_actuator = actuator_id
-            self.switch_to_timeline_canvas(actuator_id)
-            # Retrieve the actuator's type and color
-            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
-            if actuator:
-                # Immediately update the plotter to reflect the clicked actuator
-                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
 
 
     def update_plotter(self, actuator_id, actuator_type, color):
@@ -2193,6 +2496,17 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add the MplCanvas back to the layout
         self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
         self.current_actuator = None  # Reset current actuator tracking
+
+    def on_actuator_clicked(self, actuator_id):
+        # When an actuator is clicked, switch to the TimelineCanvas
+        if self.current_actuator != actuator_id:
+            self.current_actuator = actuator_id
+            self.switch_to_timeline_canvas(actuator_id)
+            # Retrieve the actuator's type and color
+            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+            if actuator:
+                # Immediately update the plotter to reflect the clicked actuator
+                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
 
     def mousePressEvent(self, event):
         # If clicked on blank space, switch back to MplCanvas
@@ -2265,6 +2579,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 width = int(dialog.width_input.text())
                 height = int(dialog.height_input.text())
                 self.actuator_canvas.set_canvas_size(width, height)
+                self.actuator_canvas.update_scale_position()
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
