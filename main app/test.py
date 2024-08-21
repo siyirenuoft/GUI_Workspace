@@ -2106,6 +2106,17 @@ class CanvasSizeDialog(QDialog):
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
         
+
+class FloatingVerticalSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.setFixedWidth(10)
+        self.setStyleSheet("background-color: gray;")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ensure it doesn't steal focus
+
+    def update_slider_height(self, height):
+        self.setFixedHeight(height)
+
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2244,6 +2255,59 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.actionSave_New_Design.triggered.connect(self.design_saver.save_design)
 
         self.ui.actionStart_New_Design.triggered.connect(self.design_saver.load_design)
+
+
+        # Slider
+        # Create a QWidget that acts as a layer for the slider
+        self.slider_layer = QWidget(self.ui.scrollAreaWidgetContents)
+        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+        self.slider_layer.setStyleSheet("background: transparent;")
+        
+        # Add a vertical slider to float over the timeline layout
+        self.floating_slider = FloatingVerticalSlider(self.slider_layer)
+        self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
+
+        # Raise the slider so it's always on top
+        self.floating_slider.raise_()
+
+        # Install an event filter to track resizing and adjust the slider
+        self.ui.scrollAreaWidgetContents.installEventFilter(self)
+
+        # Connect mouse events to handle slider dragging
+        self.floating_slider.mousePressEvent = self.slider_mouse_press_event
+        self.floating_slider.mouseMoveEvent = self.slider_mouse_move_event
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Type.Resize and source is self.ui.scrollAreaWidgetContents:
+            # Adjust the slider layer to match the size of the scroll area content
+            self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+            self.floating_slider.update_slider_height(self.ui.scrollAreaWidgetContents.height())
+        return super(Haptics_App, self).eventFilter(source, event)
+
+    def slider_mouse_press_event(self, event):
+        # Store the initial position when the slider is clicked
+        self.slider_start_pos = event.globalPosition().toPoint()
+        super(QSlider, self.floating_slider).mousePressEvent(event)
+
+    def slider_mouse_move_event(self, event):
+        # Calculate the horizontal movement based on the difference from the start position
+        delta_x = event.globalPosition().x() - self.slider_start_pos.x()
+        self.slider_start_pos = event.globalPosition().toPoint()
+
+        # Update the slider's horizontal position within the timeline layout
+        new_x = int(self.floating_slider.x() + delta_x)
+        max_x = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
+
+        # Ensure the slider stays within bounds
+        if new_x < 0:
+            new_x = 0
+        elif new_x > max_x:
+            new_x = max_x
+
+        # Move the slider to the new position
+        self.floating_slider.move(new_x, self.floating_slider.y())
+        super(QSlider, self.floating_slider).mouseMoveEvent(event)
 
     def update_actuator_text(self):
         # Find the global largest stop time across all actuators
