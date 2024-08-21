@@ -451,26 +451,26 @@ ACTUATOR_CONFIG = {
 
 # Predefined color list for actuators (20 colors)
 COLOR_LIST = [
-    QColor(194, 166, 159),  # Pale Taupe
-    QColor(171, 205, 239),  # Light Blue
-    QColor(194, 178, 128),  # Khaki
-    QColor(242, 215, 213),  # Misty Rose
-    QColor(204, 204, 255),  # Lavender
-    QColor(200, 202, 167),  # Pale Goldenrod
-    QColor(180, 144, 125),  # Tan
-    QColor(150, 143, 132),  # Dark Gray
-    QColor(206, 179, 139),  # Burly Wood
-    QColor(160, 159, 153),  # Light Slate Gray
     QColor(158, 175, 163),  # Dark Sea Green
+    QColor(194, 166, 159),  # Pale Taupe
+    QColor(194, 178, 128),  # Khaki
+    QColor(145, 141, 18),  # Khaki
+    QColor(150, 143, 132),  # Dark Gray
     QColor(175, 167, 191),  # Thistle
-    QColor(224, 224, 224),  # Gainsboro
-    QColor(192, 192, 192),  # Silver
-    QColor(230, 159, 125),  # Peach
-    QColor(255, 182, 193),  # Light Pink
-    QColor(139, 121, 94),   # Umber
-    QColor(169, 196, 176),  # Dark Moss Green
     QColor(144, 175, 197),  # Cadet Blue
-    QColor(188, 170, 164)   # Rosy Brown
+    QColor(151, 102, 102),  
+    QColor(227, 140, 122),
+    QColor(103, 98, 172),
+    QColor(33, 104, 80),
+    QColor(183, 87, 116),
+    QColor(119, 80, 29),
+    QColor(172, 94, 169),
+    QColor(81, 146, 58),
+    QColor(21, 45, 138),
+    QColor(206, 21, 39),
+    QColor(199, 90, 18),
+    QColor(100, 199, 187),
+    QColor(209, 139, 0),
 ]
 
 # Function to generate a contrasting color
@@ -879,10 +879,13 @@ class ActuatorCanvas(QGraphicsView):
         
         branch = new_id.split('.')[0]
         if branch not in self.branch_colors:
+
             if self.color_index < len(COLOR_LIST):
+                print("here",self.color_index)
                 self.branch_colors[branch] = COLOR_LIST[self.color_index]
                 self.color_index += 1
             else:
+                print("here!!!",self.color_index)
                 self.branch_colors[branch] = generate_contrasting_color(list(self.branch_colors.values()))
         color = self.branch_colors[branch]
 
@@ -1123,46 +1126,64 @@ class ActuatorCanvas(QGraphicsView):
 
     def edit_actuator_properties(self, actuator):
         dialog = ActuatorPropertiesDialog(actuator, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            old_id = actuator.id
-            new_id = dialog.id_input.text()
-            actuator.id = new_id
-            
-            # Update color if branch has changed
-            old_branch = old_id.split('.')[0]
-            new_branch = new_id.split('.')[0]
-            if old_branch != new_branch:
-                if new_branch not in self.branch_colors:
-                    self.branch_colors[new_branch] = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-                actuator.color = self.branch_colors[new_branch]
-            
-            new_type = dialog.get_type()
-            if new_type != actuator.actuator_type:
-                actuator.actuator_type = new_type
-                # Reapply configuration for new type
-                config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
-                actuator.text_vertical_offset = config["text_vertical_offset"]
-                actuator.text_horizontal_offset = config["text_horizontal_offset"]
-                actuator.font_size_factor = config["font_size_factor"]
-                actuator.min_font_size = config["min_font_size"]
-                actuator.max_font_size = config["max_font_size"]
-            
-            actuator.predecessor = dialog.predecessor_input.text()
-            actuator.successor = dialog.successor_input.text()
-            
-            actuator.size = self.actuator_size  # Use the canvas's actuator size
-            
-            actuator.update()
-            
-            # Update other actuators if necessary
-            self.update_related_actuators(old_id, new_id)
+        while True:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                old_id = actuator.id
+                new_id = dialog.id_input.text()
 
-            self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
+                # Check for ID conflicts
+                if any(act.id == new_id and act != actuator for act in self.actuators):
+                    # Show a warning message if there's a conflict
+                    QMessageBox.warning(self, "ID Conflict Detected", f"Actuator ID '{new_id}' already exists. Please choose a different ID.")
+                    continue  # Reopen the dialog for the user to change the ID
+                
+                actuator.id = new_id
+                
+                # Update color if branch has changed
+                old_branch = old_id.split('.')[0]
+                new_branch = new_id.split('.')[0]
+                if old_branch != new_branch:
+                    if new_branch not in self.branch_colors:
+                        if self.color_index < len(COLOR_LIST):
+                            self.branch_colors[new_branch] = COLOR_LIST[self.color_index]
+                            self.color_index += 1
+                        else:
+                            self.branch_colors[new_branch] = generate_contrasting_color(list(self.branch_colors.values()))
+                    actuator.color = self.branch_colors[new_branch]
+                
+                new_type = dialog.get_type()
+                if new_type != actuator.actuator_type:
+                    actuator.actuator_type = new_type
+                    # Reapply configuration for new type
+                    config = ACTUATOR_CONFIG.get(actuator.actuator_type, ACTUATOR_CONFIG["LRA"])
+                    actuator.text_vertical_offset = config["text_vertical_offset"]
+                    actuator.text_horizontal_offset = config["text_horizontal_offset"]
+                    actuator.font_size_factor = config["font_size_factor"]
+                    actuator.min_font_size = config["min_font_size"]
+                    actuator.max_font_size = config["max_font_size"]
+                
+                actuator.predecessor = dialog.predecessor_input.text()
+                actuator.successor = dialog.successor_input.text()
+                
+                actuator.size = self.actuator_size  # Use the canvas's actuator size
+                
+                actuator.update()
+                
+                # Update other actuators if necessary
+                self.update_related_actuators(old_id, new_id)
 
-            # Update plotter immediately
-            self.haptics_app.update_timeline_actuator(old_id, new_id, new_type, actuator.color.name())
+                self.properties_changed.emit(old_id, new_id, new_type, actuator.color.name())
 
-            self.redraw_all_lines() # Trigger a redraw of all lines
+                # Update plotter immediately
+                self.haptics_app.update_timeline_actuator(old_id, new_id, new_type, actuator.color.name())
+
+                self.redraw_all_lines()  # Trigger a redraw of all lines
+
+                break  # Exit the loop if everything is fine
+
+            else:
+                break  # Exit if the dialog is canceled
+
 
 
     def update_related_actuators(self, old_id, new_id):
@@ -1498,7 +1519,7 @@ class TimelineCanvas(FigureCanvas):
                 return True
         return False
 
-    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data):
+    def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data, parameters):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Time Range Overlap")
         msg_box.setText(f"The time range overlaps with an existing signal.")
@@ -1510,7 +1531,7 @@ class TimelineCanvas(FigureCanvas):
         msg_box.exec()
 
         if msg_box.clickedButton() == replace_button:
-            self.replace_overlap(new_start_time, new_stop_time, signal_data)
+            self.replace_overlap(new_start_time, new_stop_time, signal_data, signal_type, parameters)
         else:
             # Adjust the previous signal to keep non-overlapping parts
             self.adjust_previous_signals(new_start_time, new_stop_time)
@@ -1524,7 +1545,7 @@ class TimelineCanvas(FigureCanvas):
                     self.record_signal(signal_type, signal_data, start_time, stop_time, None)
 
 
-    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data):
+    def replace_overlap(self, new_start_time, new_stop_time, new_signal_data, new_signal_type, new_signal_parameters):
         adjusted_signals = []
 
         for signal in self.signals:
@@ -1562,12 +1583,14 @@ class TimelineCanvas(FigureCanvas):
 
         # Add the new signal as well
         adjusted_signals.append({
-            "type": None,
+            "type": new_signal_type,
             "data": new_signal_data,
             "start_time": new_start_time,
             "stop_time": new_stop_time,
-            "parameters": None
+            "parameters": new_signal_parameters
         })
+
+        print(adjusted_signals)
 
         self.signals = adjusted_signals
         self.plot_all_signals()  # Update the plot with the modified signals
@@ -1633,37 +1656,37 @@ class TimelineCanvas(FigureCanvas):
             event.ignore()
 
     def dropEvent(self, event):
-            # Get the dragged signal type
-            item = event.source().selectedItems()[0]
-            signal_type = item.text(0)
+        # Get the dragged signal type
+        item = event.source().selectedItems()[0]
+        signal_type = item.text(0)
 
-            # Determine if the signal is customized or imported
-            if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
-                signal_data = self.get_signal_data(signal_type)
-                if signal_data:
-                    start_time, stop_time = self.show_time_input_dialog(signal_type)
-                    if start_time is not None and stop_time is not None and stop_time > start_time:
-                        if self.check_overlap(start_time, stop_time):
-                            self.handle_overlap(start_time, stop_time, signal_type, signal_data)
-                        else:
-                            self.record_signal(signal_type, signal_data, start_time, stop_time, None)
-            else:
-                parameters = self.prompt_signal_parameters(signal_type)
-                if parameters is not None:
-                    start_time, stop_time = self.show_time_input_dialog(signal_type)
-                    if start_time is not None and stop_time is not None and stop_time > start_time:
-                        signal_data = self.generate_signal_data(signal_type, parameters)
-                        if self.check_overlap(start_time, stop_time):
-                            self.handle_overlap(start_time, stop_time, signal_type, signal_data)
-                        else:
-                            self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
+        # Determine if the signal is customized or imported
+        if signal_type in self.app_reference.custom_signals or signal_type in self.app_reference.imported_signals:
+            signal_data = self.get_signal_data(signal_type)
+            if signal_data:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    if self.check_overlap(start_time, stop_time):
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                    else:
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+        else:
+            parameters = self.prompt_signal_parameters(signal_type)
+            if parameters is not None:
+                start_time, stop_time = self.show_time_input_dialog(signal_type)
+                if start_time is not None and stop_time is not None and stop_time > start_time:
+                    signal_data = self.generate_signal_data(signal_type, parameters)
+                    if self.check_overlap(start_time, stop_time):
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                    else:
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
 
-            # After recording the new signal, update the plot
-            if self.signals:
-                self.plot_all_signals()
+        # After recording the new signal, update the plot
+        if self.signals:
+            self.plot_all_signals()
 
-            self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
-            self.app_reference.update_actuator_text()
+        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
+        self.app_reference.update_actuator_text()
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -1714,7 +1737,14 @@ class TimelineCanvas(FigureCanvas):
             stop_sample = int(signal["stop_time"] * 500)
             signal_duration = stop_sample - start_sample
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            if len(signal["data"]) > 0:
+                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            else:
+                # Handle the case where signal["data"] is empty
+                # You can either skip this signal or generate a default signal.
+                print(f"Warning: signal data is empty for signal {signal['type']}.")
+                signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
+
             combined_signal[start_sample:stop_sample] = signal_data
 
         # Generate time array for the x-axis
@@ -1740,7 +1770,7 @@ class TimelineCanvas(FigureCanvas):
 
         # dragggg
         # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 20:
+        if self.signal_duration > 10:
             self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
       
 
@@ -1942,7 +1972,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
 
         # Enable scroll bars for the timeline canvas
-        #self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.ui.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         # Connect clear button to clear_plot method
@@ -2019,23 +2049,92 @@ class Haptics_App(QtWidgets.QMainWindow):
         if all_stop_times:
             global_total_time = max(all_stop_times)
         else:
-            global_total_time = 0
+            global_total_time = 1  # Avoid division by zero in the width calculation
 
-        # Update the text for each actuator widget
+        # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
 
-                # Generate the signal text (show signal type, start/stop times, and parameters)
-                signal_texts = []
-                for signal in signals:
-                    param_str = ', '.join([f'{key}: {value}' for key, value in (signal["parameters"] or {}).items()])
-                    signal_text = f'{signal["type"]} ({param_str})\nStart: {signal["start_time"]:.2f}s, Stop: {signal["stop_time"]:.2f}s'
-                    signal_texts.append(signal_text)
+                # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
+                # Assuming the first widget in the layout is the actuator label (ID and type)
+                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
+                    item = actuator_widget.layout().takeAt(i)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+                    else:
+                        del item  # Remove spacers
 
-                # Set the text with the global largest time and signal details, including start and stop times
-                actuator_label.setText(f"Global Total Time: {global_total_time:.2f}s\n" + "\n".join(signal_texts))
-                actuator_label.setStyleSheet("color: white;")  # Ensure the text is visible
+                # Set up the layout for the actuator widget if not already done
+                if not actuator_widget.layout():
+                    layout = QtWidgets.QHBoxLayout()
+                    actuator_widget.setLayout(layout)
+                    layout.setContentsMargins(0, 0, 0, 0)
+                    layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
+
+                # Ensure the ID/Type label stays in the first position
+                if actuator_label.parent() is None:
+                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
+
+                # Create a container for the timeline and signal widgets
+                timeline_container = QtWidgets.QWidget(actuator_widget)
+                timeline_container.setStyleSheet("background-color: transparent;")
+                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
+                timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
+                timeline_layout.setContentsMargins(0, 0, 0, 0)
+                timeline_layout.setSpacing(0)
+
+                # Calculate the width of the actuator widget based on the global total time
+                widget_width = actuator_widget.size().width()
+
+                # Track the last stop time to insert gaps
+                last_stop_time = 0
+
+                # Sort signals by start time
+                signals.sort(key=lambda signal: signal["start_time"])
+
+                for signal in signals:
+                    # Calculate the relative width of the signal widget based on its duration
+                    signal_duration = signal["stop_time"] - signal["start_time"]
+                    signal_width_ratio = signal_duration / global_total_time
+                    signal_width = int(signal_width_ratio * widget_width)
+
+                    # Calculate the relative starting position of the signal widget
+                    signal_start_ratio = signal["start_time"] / global_total_time
+                    signal_start_position = int(signal_start_ratio * widget_width)
+
+                    # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
+                    if signal["start_time"] > last_stop_time:
+                        gap_duration = signal["start_time"] - last_stop_time
+                        gap_width_ratio = gap_duration / global_total_time
+                        gap_width = int(gap_width_ratio * widget_width)
+
+                        # Add a spacer to represent the gap
+                        spacer = QtWidgets.QSpacerItem(gap_width, 30, QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Minimum)
+                        timeline_layout.addItem(spacer)
+
+                    # Create the signal widget, making it smaller vertically and with rounded corners
+                    signal_widget = QtWidgets.QLabel(f'{signal["type"]} ({", ".join([f"{k}: {v}" for k, v in (signal["parameters"] or {}).items()])})')
+                    signal_widget.setFixedSize(signal_width, 30)  # Set smaller height for the signal widget
+                    signal_widget.setStyleSheet("""
+                        background-color: rgba(100, 150, 250, 150); 
+                        color: white; 
+                        border-radius: 7px;
+                        padding: 3px;
+                    """)
+
+                    # Add the signal widget to the layout
+                    timeline_layout.addWidget(signal_widget)
+
+                    # Update the last stop time
+                    last_stop_time = signal["stop_time"]
+
+                # Add a stretch to fill the remaining space
+                timeline_layout.addStretch()
+
+                # Add the timeline container to the actuator widget after the ID and type
+                actuator_widget.layout().addWidget(timeline_container)
 
 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
