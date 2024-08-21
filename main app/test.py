@@ -36,6 +36,36 @@ class DesignSaver:
         self.mpl_canvas = mpl_canvas
         self.app_reference = app_reference
 
+    def reset_app(self):
+        """Resets the entire app to its default state."""
+        # Clear all actuators
+        self.app_reference.clear_canvas_and_timeline(bypass_dialog=True)
+        print("Actuator and Timeline Cleared")
+        
+        # Clear all imported signals in MplCanvas
+        self.mpl_canvas.clear_plot()
+        
+        # Clear any app-specific signals or state
+        self.app_reference.imported_signals.clear()
+        print("Imported Signals Cleared")
+
+    def prompt_save_before_loading(self):
+        """Prompt the user to save the current design before loading a new one."""
+        response = QMessageBox.question(
+            None,
+            "Save Current Design",
+            "Do you want to save the current design before loading a new one?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        )
+        
+        if response == QMessageBox.StandardButton.Yes:
+            self.save_design()  # Call save_design if the user wants to save
+            return True  # Continue with loading
+        elif response == QMessageBox.StandardButton.No:
+            return True  # Proceed without saving
+        else:
+            return False  # Cancel the load operation
+
     def save_design(self):
         file_name, _ = QFileDialog.getSaveFileName(None, "Save As", "", "Design Files (*.dsgn)")
         if file_name:
@@ -46,8 +76,16 @@ class DesignSaver:
                 QMessageBox.information(None, "Success", "Design saved successfully!")
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to save design: {str(e)}")
-    
+
     def load_design(self):
+        # Ask user if they want to save current design before loading
+        if not self.prompt_save_before_loading():
+            return  # User canceled the load operation
+
+        # Default the app to clear the current state
+        self.reset_app()
+
+        # Proceed with loading the new design
         file_name, _ = QFileDialog.getOpenFileName(None, "Open Design", "", "Design Files (*.dsgn)")
         if file_name:
             try:
@@ -57,7 +95,7 @@ class DesignSaver:
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
-
+    
     def collect_design_data(self):
         # Collect data from Actuator Canvas
         actuator_data = []
@@ -118,7 +156,7 @@ class DesignSaver:
         
         # Restore timeline signals
         for signal_info in design_data['timeline']:
-            # You may need to determine which timeline_canvas this signal belongs to, possibly based on actuator_id
+            # Find the corresponding timeline canvas based on actuator_id
             corresponding_timeline_canvas = self.timeline_canvases[signal_info['actuator_id']]
             corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
                                                         signal_info['start_time'], signal_info['stop_time'], 
@@ -1887,16 +1925,49 @@ class TimelineCanvas(FigureCanvas):
 
 
     def prompt_signal_parameters(self, signal_type):
-        # This method prompts the user to modify the signal parameters using a dialog.
-        if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
-            dialog = OscillatorDialog(signal_type, self)
+        # Define mappings between signal types and dialogs
+        signal_dialog_map = {
+            "Sine": OscillatorDialog,
+            "Square": OscillatorDialog,
+            "Saw": OscillatorDialog,
+            "Triangle": OscillatorDialog,
+            "Chirp": OscillatorDialog,
+            "FM": OscillatorDialog,
+            "PWM": OscillatorDialog,
+            "Noise": OscillatorDialog,
+            "Envelope": EnvelopeDialog,
+            "Keyed Envelope": EnvelopeDialog,
+            "ASR": EnvelopeDialog,
+            "ADSR": EnvelopeDialog,
+            "Exponential Decay": EnvelopeDialog,
+            "PolyBezier": EnvelopeDialog,
+            "Signal Envelope": EnvelopeDialog
+        }
+        
+        # Get the dialog class based on signal type
+        dialog_class = signal_dialog_map.get(signal_type)
+        
+        if dialog_class:
+            # Try without parent if dialog is black in certain contexts
+            dialog = dialog_class(signal_type)  # Removed 'self' as parent
+            # Optional: Force update
+            dialog.update()
+            
+            # Repaint the parent widget, if needed
+            self.repaint()
+            
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                return dialog.get_config()
-        elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
-            dialog = EnvelopeDialog(signal_type, self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                return dialog.get_config()
-        return None
+                config = dialog.get_config()
+                # Add validation or logging here if needed
+                if config:
+                    return config
+                else:
+                    print(f"Invalid parameters for {signal_type}.")
+        else:
+            print(f"Unrecognized signal type: {signal_type}")
+            
+        return None  # Return None if dialog was canceled or invalid
+
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
         # Record the signal data and its parameters into the signals list
@@ -1951,6 +2022,7 @@ class TimelineCanvas(FigureCanvas):
     def plot_signal_data(self, t, signal_data):
         # Clear the current plot and plot the new signal
         self.axes.clear()
+        
         # Set spine color and customize appearance
         spine_color = to_rgba((240/255, 235/255, 229/255))
         self.axes.spines['bottom'].set_color(spine_color)
@@ -1965,13 +2037,26 @@ class TimelineCanvas(FigureCanvas):
         # Plot the signal data
         self.axes.plot(t, signal_data, color=spine_color)
 
-        # dragggg
         # Check if the signal is longer than 10 seconds
         if self.signal_duration > 10:
             self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
-      
+            
+            # Adjust arrow size and location using mutation_scale
+            arrow_props = dict(facecolor='gray', edgecolor='none', alpha=0.6, mutation_scale=50)
 
+            # Left arrow at the start of the plot
+            self.axes.annotate('', xy=(0.035, 0.5), xytext=(-0.1, 0.5),
+                            xycoords='axes fraction', textcoords='axes fraction',
+                            arrowprops=dict(arrowstyle='-|>', **arrow_props))
+
+            # Right arrow at the end of the plot
+            self.axes.annotate('', xy=(0.965, 0.5), xytext=(1.1, 0.5),
+                            xycoords='axes fraction', textcoords='axes fraction',
+                            arrowprops=dict(arrowstyle='-|>', **arrow_props))
+
+        # Draw the updated plot
         self.draw()
+
 
     def generate_signal_data(self, signal_type, parameters):
         # Generate the signal data based on the type and modified parameters
@@ -2475,41 +2560,49 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Display the signal type and parameters in the status bar
         self.statusBar().showMessage(f"Current Signal: {signal_type} | Parameters: {param_str}")
 
-    def clear_canvas_and_timeline(self):
-        # Prompt a warning to the user
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Clear Actuator and Timeline Data")
-        msg_box.setText("Are you sure you want to clear all the actuators and corresponding timeline data?")
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        # Apply the custom stylesheet for the message box
-        msg_box.setStyleSheet("""
-            QMessageBox { background-color: white; }
-            QLabel { color: black; }
-            QPushButton { 
-                background-color: white; 
-                color: black; 
-                border: 1px solid black; 
-                padding: 5px; 
-            }
-            QPushButton:hover { 
-                background-color: gray; 
-            }
-        """)
+    def clear_canvas_and_timeline(self, bypass_dialog=False):
+        if not bypass_dialog:
+            # Prompt a warning to the user
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Clear Actuator and Timeline Data")
+            msg_box.setText("Are you sure you want to clear all the actuators and corresponding timeline data?")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            # Apply the custom stylesheet for the message box
+            msg_box.setStyleSheet("""
+                QMessageBox { background-color: white; }
+                QLabel { color: black; }
+                QPushButton { 
+                    background-color: white; 
+                    color: black; 
+                    border: 1px solid black; 
+                    padding: 5px; 
+                }
+                QPushButton:hover { 
+                    background-color: gray; 
+                }
+            """)
 
-        result = msg_box.exec()
+            result = msg_box.exec()
 
-        if result == QMessageBox.StandardButton.Yes:
-            # If user confirms, clear the canvas and timeline
+            if result == QMessageBox.StandardButton.Yes:
+                # If user confirms, clear the canvas and timeline
+                self.actuator_canvas.clear_lines_except_scale()  # Clear lines, not the scale line
+                self.actuator_canvas.clear_canvas()  # Clear actuators
+                self.clear_timeline_canvas()  # Clear timeline
+                self.reset_color_management()
+                
+            else:
+                # If user cancels, do nothing
+                return
+        else:
+            # Bypass dialog and clear the canvas and timeline directly
             self.actuator_canvas.clear_lines_except_scale()  # Clear lines, not the scale line
             self.actuator_canvas.clear_canvas()  # Clear actuators
             self.clear_timeline_canvas()  # Clear timeline
             self.reset_color_management()
-            
-        else:
-            # If user cancels, do nothing
-            return
+
 
     def clear_timeline_canvas(self):
         # Clear the timeline layout
