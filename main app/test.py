@@ -2195,18 +2195,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             actuator.signal_handler.properties_changed.connect(self.update_plotter)
 
 
-    def on_actuator_clicked(self, actuator_id):
-        # When an actuator is clicked, switch to the TimelineCanvas
-        if self.current_actuator != actuator_id:
-            self.current_actuator = actuator_id
-            self.switch_to_timeline_canvas(actuator_id)
-            # Retrieve the actuator's type and color
-            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
-            if actuator:
-                # Immediately update the plotter to reflect the clicked actuator
-                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
-
-
     def update_plotter(self, actuator_id, actuator_type, color):
         if self.current_actuator == actuator_id:
             self.switch_to_timeline_canvas(actuator_id)  # Update the plotter to reflect changes
@@ -2244,6 +2232,17 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add the MplCanvas back to the layout
         self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
         self.current_actuator = None  # Reset current actuator tracking
+
+    def on_actuator_clicked(self, actuator_id):
+        # When an actuator is clicked, switch to the TimelineCanvas
+        if self.current_actuator != actuator_id:
+            self.current_actuator = actuator_id
+            self.switch_to_timeline_canvas(actuator_id)
+            # Retrieve the actuator's type and color
+            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+            if actuator:
+                # Immediately update the plotter to reflect the clicked actuator
+                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
 
     def mousePressEvent(self, event):
         # If clicked on blank space, switch back to MplCanvas
