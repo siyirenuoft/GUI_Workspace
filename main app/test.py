@@ -2592,6 +2592,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.actuator_canvas.clear_canvas()  # Clear actuators
                 self.clear_timeline_canvas()  # Clear timeline
                 self.reset_color_management()
+                self.switch_to_main_canvas()
                 
             else:
                 # If user cancels, do nothing
@@ -2602,6 +2603,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.actuator_canvas.clear_canvas()  # Clear actuators
             self.clear_timeline_canvas()  # Clear timeline
             self.reset_color_management()
+            self.switch_to_main_canvas()
 
 
     def clear_timeline_canvas(self):
