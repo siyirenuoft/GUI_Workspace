@@ -432,12 +432,12 @@
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionStart_New_Design">
    <property name="text">
-    <string>Load Design</string>
+    <string>Start New Design</string>
    </property>
   </action>
   <action name="actionSave_New_Design">
    <property name="text">
-    <string>Save As...</string>
+    <string>Save New Design</string>
    </property>
   </action>
   <action name="actionImport_Waveform">

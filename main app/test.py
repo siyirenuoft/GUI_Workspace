@@ -18,7 +18,6 @@ from datetime import date, datetime
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 import json
-import pickle
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
 from PyQt6.QtCore import Qt, pyqtSlot, QPoint
@@ -31,109 +30,6 @@ from PyQt6.QtGui import QPainter, QPen, QBrush
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
-
-class DesignSaver:
-    def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
-        self.actuator_canvas = actuator_canvas
-        self.timeline_canvases = timeline_canvases
-        self.mpl_canvas = mpl_canvas
-        self.app_reference = app_reference
-
-    def save_design(self):
-        file_name, _ = QFileDialog.getSaveFileName(None, "Save As", "", "Design Files (*.dsgn)")
-        if file_name:
-            try:
-                design_data = self.collect_design_data()
-                with open(file_name, 'wb') as file:
-                    pickle.dump(design_data, file)
-                QMessageBox.information(None, "Success", "Design saved successfully!")
-            except Exception as e:
-                QMessageBox.warning(None, "Error", f"Failed to save design: {str(e)}")
-    
-    def load_design(self):
-        file_name, _ = QFileDialog.getOpenFileName(None, "Open Design", "", "Design Files (*.dsgn)")
-        if file_name:
-            try:
-                with open(file_name, 'rb') as file:
-                    design_data = pickle.load(file)
-                self.apply_design_data(design_data)
-                QMessageBox.information(None, "Success", "Design loaded successfully!")
-            except Exception as e:
-                QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
-
-    def collect_design_data(self):
-        # Collect data from Actuator Canvas
-        actuator_data = []
-        for actuator in self.actuator_canvas.actuators:
-            actuator_data.append({
-                'id': actuator.id,
-                'type': actuator.actuator_type,
-                'color': actuator.color.name(),
-                'position': (actuator.pos().x(), actuator.pos().y()),
-                'predecessor': actuator.predecessor,
-                'successor': actuator.successor
-            })
-        
-        # Collect data from Timeline Canvas
-        #print("Timeline Signals:", self.timeline_canvas['signals'])
-        timeline_data = []
-        for actuator_id, timeline_canvas in self.timeline_canvases.items():
-            for signal in timeline_canvas.signals:
-                timeline_data.append({
-                    'actuator_id': actuator_id,  # Include actuator ID to link the signal to its actuator
-                    'type': signal["type"],
-                    'start_time': signal["start_time"],
-                    'stop_time': signal["stop_time"],
-                    'data': signal["data"],
-                    'parameters': signal["parameters"]
-                })
-        
-        # Collect data from MplCanvas (Imported signals)
-        mpl_data = []
-        for signal_name, signal_data in self.app_reference.imported_signals.items():
-            mpl_data.append({
-                'name': signal_name,
-                'data': signal_data
-            })
-        
-        # Combine all data into a dictionary
-        design_data = {
-            'actuators': actuator_data,
-            'timeline': timeline_data,
-            'mpl_signals': mpl_data
-        }
-        return design_data
-
-    def apply_design_data(self, design_data):
-        # Clear existing canvases
-        self.actuator_canvas.clear_canvas()
-        for actuator_id, timeline_canvas in self.timeline_canvases.items():
-            timeline_canvas.signals.clear()
-        self.mpl_canvas.clear_plot()
-        
-        # Restore actuators
-        for actuator_info in design_data['actuators']:
-            x, y = actuator_info['position']
-            self.actuator_canvas.add_actuator(x, y, new_id=actuator_info['id'], 
-                                              actuator_type=actuator_info['type'], 
-                                              predecessor=actuator_info['predecessor'], 
-                                              successor=actuator_info['successor'])
-        
-        # Restore timeline signals
-        for signal_info in design_data['timeline']:
-            # You may need to determine which timeline_canvas this signal belongs to, possibly based on actuator_id
-            corresponding_timeline_canvas = self.timeline_canvases[signal_info['actuator_id']]
-            corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
-                                                        signal_info['start_time'], signal_info['stop_time'], 
-                                                        signal_info['parameters'])
-        
-        # Restore imported signals in MplCanvas
-        for signal_info in design_data['mpl_signals']:
-            self.app_reference.imported_signals[signal_info['name']] = signal_info['data']
-        
-        # Redraw the canvases
-        self.actuator_canvas.redraw_all_lines()
-        self.mpl_canvas.plot([], [])  # Redraw the MplCanvas
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
@@ -1301,18 +1197,6 @@ class ActuatorCanvas(QGraphicsView):
                 old_branch = old_id.split('.')[0]
                 new_branch = new_id.split('.')[0]
                 if old_branch != new_branch:
-                    if actuator.predecessor:
-                        print("pred", actuator.predecessor)
-                        predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
-                        if predecessor_actuator:
-                            predecessor_actuator.successor = None
-                        
-                    if actuator.successor:
-                        print("succ", actuator.successor)
-                        successor_actuator = self.get_actuator_by_id(actuator.successor)
-                        if successor_actuator:
-                            successor_actuator.predecessor = None
-
                     if new_branch not in self.branch_colors:
                         if self.color_index < len(COLOR_LIST):
                             self.branch_colors[new_branch] = COLOR_LIST[self.color_index]
@@ -1336,10 +1220,6 @@ class ActuatorCanvas(QGraphicsView):
                 actuator.successor = dialog.successor_input.text()
                 
                 actuator.size = self.actuator_size  # Use the canvas's actuator size
-                
-                if old_branch != new_branch:
-                    actuator.predecessor = None
-                    actuator.successor = None
                 
                 actuator.update()
                 
@@ -1369,61 +1249,35 @@ class ActuatorCanvas(QGraphicsView):
             act.update()
 
     def remove_actuator(self, actuator):
-        """Remove an actuator and update its predecessor and successor appropriately."""
-        if actuator.predecessor or actuator.successor:
-            predecessor_actuator = self.get_actuator_by_id(actuator.predecessor) if actuator.predecessor else None
-            successor_actuator = self.get_actuator_by_id(actuator.successor) if actuator.successor else None
+        selected_items = self.scene.selectedItems()
 
-            # Handle the case of A-B-C, where B is being deleted
-            if predecessor_actuator and successor_actuator:
-                # Update A's successor to be C
-                predecessor_actuator.successor = successor_actuator.id
-                predecessor_actuator.update()
+        if selected_items:
+            for item in selected_items:
+                if isinstance(item, Actuator):
+                    # Ensure the item is still part of the scene
+                    if item.scene() == self.scene:
+                        matching_actuators = [a for a in self.actuators if a.id == item.id]
+                        if matching_actuators:
+                            self.actuators.remove(matching_actuators[0])
+                        self.scene.removeItem(item)
+                        self.actuator_deleted.emit(item.id)  # Emit the deletion signal
+                        # Remove from plotter immediately
+                        self.haptics_app.remove_actuator_from_timeline(item.id)
+        else:
+            # Ensure the actuator is still part of the scene
+            if actuator.scene() == self.scene:
+                matching_actuators = [a for a in self.actuators if a.id == actuator.id]
+                if matching_actuators:
+                    self.actuators.remove(matching_actuators[0])
+                self.scene.removeItem(actuator)
+                self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
+                # Remove from plotter immediately
+                self.haptics_app.remove_actuator_from_timeline(actuator.id)
 
-                # Update C's predecessor to be A
-                successor_actuator.predecessor = predecessor_actuator.id
-                successor_actuator.update()
+        self.redraw_all_lines()  # Trigger a redraw of all lines
 
-            elif predecessor_actuator:
-                # If there is only a predecessor (no successor), just remove the successor reference from A
-                predecessor_actuator.successor = None
-                predecessor_actuator.update()
 
-            elif successor_actuator:
-                # If there is only a successor (no predecessor), just remove the predecessor reference from C
-                successor_actuator.predecessor = None
-                successor_actuator.update()
 
-        # Ensure that both predecessors and successors are unique after deletion
-        #self.ensure_unique_connections()
-
-        # Remove the actuator from the scene
-        self.actuators.remove(actuator)
-        self.scene.removeItem(actuator)
-        self.actuator_deleted.emit(actuator.id)  # Emit the deletion signal
-
-        # Redraw all lines after deletion
-        self.redraw_all_lines()
-
-    # def ensure_unique_connections(self):
-    #     """Ensure all actuators have unique predecessors and successors."""
-    #     seen_predecessors = set()
-    #     seen_successors = set()
-
-    #     for actuator in self.actuators:
-    #         if actuator.predecessor in seen_predecessors:
-    #             actuator.predecessor = None  # Clear the duplicate predecessor
-    #             actuator.update()
-
-    #         if actuator.successor in seen_successors:
-    #             actuator.successor = None  # Clear the duplicate successor
-    #             actuator.update()
-
-    #         # Track unique predecessors and successors
-    #         if actuator.predecessor:
-    #             seen_predecessors.add(actuator.predecessor)
-    #         if actuator.successor:
-    #             seen_successors.add(actuator.successor)
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -2315,14 +2169,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Move the slider to the new position
         self.floating_slider.move(new_x, self.floating_slider.y())
         super(QSlider, self.floating_slider).mouseMoveEvent(event)
-        # Instantiate DesignSaver
-        self.design_saver = DesignSaver(self.actuator_canvas, self.timeline_canvases, self.maincanvas, self)
-
-        # Connect the "Save As..." action to the save_design method
-        self.ui.actionSave_New_Design.triggered.connect(self.design_saver.save_design)
-
-        self.ui.actionStart_New_Design.triggered.connect(self.design_saver.load_design)
-
     def update_actuator_text(self):
         # Find the global largest stop time across all actuators
         all_stop_times = []
