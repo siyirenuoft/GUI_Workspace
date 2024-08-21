@@ -2469,6 +2469,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 width = int(dialog.width_input.text())
                 height = int(dialog.height_input.text())
                 self.actuator_canvas.set_canvas_size(width, height)
+                self.actuator_canvas.update_scale_position()
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
