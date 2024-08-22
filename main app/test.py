@@ -36,19 +36,6 @@ class DesignSaver:
         self.mpl_canvas = mpl_canvas
         self.app_reference = app_reference
 
-    def reset_app(self):
-        """Resets the entire app to its default state."""
-        # Clear all actuators
-        self.app_reference.clear_canvas_and_timeline(bypass_dialog=True)
-        print("Actuator and Timeline Cleared")
-        
-        # Clear all imported signals in MplCanvas
-        self.mpl_canvas.clear_plot()
-        
-        # Clear any app-specific signals or state
-        self.app_reference.imported_signals.clear()
-        print("Imported Signals Cleared")
-
     def prompt_save_before_loading(self):
         """Prompt the user to save the current design before loading a new one."""
         response = QMessageBox.question(
@@ -66,6 +53,14 @@ class DesignSaver:
         else:
             return False  # Cancel the load operation
 
+    def reset_app(self):
+        """Resets the entire app to its default state."""
+        self.app_reference.clear_canvas_and_timeline(bypass_dialog=True)
+        print("Actuators and Timeline Cleared")
+        self.mpl_canvas.clear_plot()
+        self.app_reference.imported_signals.clear()
+        print("Imported Signals Cleared")
+
     def save_design(self):
         file_name, _ = QFileDialog.getSaveFileName(None, "Save As", "", "Design Files (*.dsgn)")
         if file_name:
@@ -82,7 +77,7 @@ class DesignSaver:
         if not self.prompt_save_before_loading():
             return  # User canceled the load operation
 
-        # Default the app to clear the current state
+        # Clear current state before loading the new design
         self.reset_app()
 
         # Proceed with loading the new design
@@ -95,7 +90,7 @@ class DesignSaver:
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
-    
+
     def collect_design_data(self):
         # Collect data from Actuator Canvas
         actuator_data = []
@@ -109,8 +104,7 @@ class DesignSaver:
                 'successor': actuator.successor
             })
         
-        # Collect data from Timeline Canvas
-        #print("Timeline Signals:", self.timeline_canvas['signals'])
+        # Collect data from Timeline Canvases
         timeline_data = []
         for actuator_id, timeline_canvas in self.timeline_canvases.items():
             for signal in timeline_canvas.signals:
@@ -123,7 +117,7 @@ class DesignSaver:
                     'parameters': signal["parameters"]
                 })
         
-        # Collect data from MplCanvas (Imported signals)
+        # Collect imported signals from MplCanvas
         mpl_data = []
         for signal_name, signal_data in self.app_reference.imported_signals.items():
             mpl_data.append({
@@ -131,44 +125,75 @@ class DesignSaver:
                 'data': signal_data
             })
         
+        # Collect custom signals
+        custom_signals_data = []
+        for signal_name, signal_data in self.app_reference.custom_signals.items():
+            custom_signals_data.append({
+                'name': signal_name,
+                'data': signal_data
+            })
+
+        # Collect branch colors from ActuatorCanvas
+        branch_colors_data = {
+            actuator_id: color.name() for actuator_id, color in self.actuator_canvas.branch_colors.items()
+        }
+
         # Combine all data into a dictionary
         design_data = {
             'actuators': actuator_data,
             'timeline': timeline_data,
-            'mpl_signals': mpl_data
+            'mpl_signals': mpl_data,
+            'custom_signals': custom_signals_data,
+            'branch_colors': branch_colors_data
         }
         return design_data
 
     def apply_design_data(self, design_data):
         # Clear existing canvases
-        self.actuator_canvas.clear_canvas()
-        for actuator_id, timeline_canvas in self.timeline_canvases.items():
-            timeline_canvas.signals.clear()
-        self.mpl_canvas.clear_plot()
-        
+        self.reset_app()
+
         # Restore actuators
         for actuator_info in design_data['actuators']:
             x, y = actuator_info['position']
             self.actuator_canvas.add_actuator(x, y, new_id=actuator_info['id'], 
-                                              actuator_type=actuator_info['type'], 
-                                              predecessor=actuator_info['predecessor'], 
-                                              successor=actuator_info['successor'])
-        
+                                            actuator_type=actuator_info['type'], 
+                                            predecessor=actuator_info['predecessor'], 
+                                            successor=actuator_info['successor'])
+
         # Restore timeline signals
         for signal_info in design_data['timeline']:
-            # Find the corresponding timeline canvas based on actuator_id
-            corresponding_timeline_canvas = self.timeline_canvases[signal_info['actuator_id']]
-            corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
-                                                        signal_info['start_time'], signal_info['stop_time'], 
-                                                        signal_info['parameters'])
-        
+            actuator_id = signal_info['actuator_id']
+            
+            # Ensure the timeline canvas is created for this actuator
+            #self.app_reference.switch_to_timeline_canvas(actuator_id)
+
+            # Retrieve the corresponding timeline canvas
+            corresponding_timeline_canvas = self.timeline_canvases.get(actuator_id)
+            print("timelinecanvas", self.timeline_canvases)
+            print("corresponding_timeline_canvas", corresponding_timeline_canvas)
+            if corresponding_timeline_canvas:
+                # Add the signal to the timeline canvas
+                corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
+                                                            signal_info['start_time'], signal_info['stop_time'], 
+                                                            signal_info['parameters'])
+                corresponding_timeline_canvas.plot_all_signals()
+
         # Restore imported signals in MplCanvas
         for signal_info in design_data['mpl_signals']:
             self.app_reference.imported_signals[signal_info['name']] = signal_info['data']
-        
-        # Redraw the canvases
+
+        # Restore custom signals
+        for signal_info in design_data['custom_signals']:
+            self.app_reference.custom_signals[signal_info['name']] = signal_info['data']
+
+        # Restore branch colors
+        for actuator_id, color in design_data['branch_colors'].items():
+            self.actuator_canvas.branch_colors[actuator_id] = QColor(color)
+
+        # Redraw all canvases and lines
         self.actuator_canvas.redraw_all_lines()
         self.mpl_canvas.plot([], [])  # Redraw the MplCanvas
+
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
@@ -1971,6 +1996,7 @@ class TimelineCanvas(FigureCanvas):
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
         # Record the signal data and its parameters into the signals list
+        print("Reached Record Signal")
         self.signals.append({
             "type": signal_type,
             "data": signal_data,
@@ -1978,6 +2004,7 @@ class TimelineCanvas(FigureCanvas):
             "stop_time": stop_time,
             "parameters": parameters
         })
+        print(self.signals)
 
     def plot_all_signals(self):
         if not self.signals:

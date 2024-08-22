@@ -1,0 +1,881 @@
+
+class Haptics_App(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        # Get the absolute path to the current script
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Construct the absolute path to the layout.ui file
+        ui_file_path = os.path.join(current_dir, 'layout.ui')
+
+        # Load the UI file
+        self.ui = uic.loadUi(ui_file_path, self)
+ 
+        self.resize(1500, 750)
+        icon = QtGui.QIcon()
+        icon_path = "resources/logo.jpg"
+
+        self.statusBar().showMessage("Welcome to Haptics App")
+
+        # Add a flag to track the first signal drop
+        self.first_signal_drop = 0
+        self.total_time = None
+
+        if os.path.exists(icon_path):
+            icon.addPixmap(QtGui.QPixmap(icon_path), QIcon.Mode.Normal, QIcon.State.Off)
+            self.setWindowIcon(icon)
+        else:
+            print(f"Icon file not found at path: {icon_path}")
+
+        self.threadpool = QtCore.QThreadPool()
+
+        # Set main background color
+        self.setStyleSheet("background-color: rgb(193, 205, 215);")
+        self.widget_2.setStyleSheet("background-color: rgb(193, 205, 215);")
+        self.widget_3.setStyleSheet("background-color: rgb(134, 150, 167);")
+
+
+        # Initialize dictionaries to store signals
+        self.custom_signals = {}  # Dictionary to store custom signals
+        self.signal_templates = {}  # Dictionary to store provided signal templates
+        self.imported_signals = {}  # Dictionary to store imported signals
+
+        # Initialize the tree widget
+        self.setup_tree_widget()
+
+        # Add matplotlib canvas to the layout
+        self.maincanvas = MplCanvas(self.ui.widget, width=5, height=1, dpi=100, app_reference=self)
+        self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
+
+        # Add ActuatorCanvas to the layout with a fixed height
+        self.actuator_canvas = ActuatorCanvas(self.ui.widget_2,app_reference=self)
+        self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
+        self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
+
+        # Create a scene for the selection bar
+        self.selection_scene = QGraphicsScene()
+
+        # Create the selection bar view and add it to the layout
+        self.selection_bar = SelectionBar(self.selection_scene)
+        self.selection_view = SelectionBarView(self.selection_scene, self.ui.widget_2)
+        self.selection_view.setFixedSize(100, 100)  # Set size and position as needed
+        self.ui.gridLayout_5.addWidget(self.selection_view, 0, 0, 1, 1)  # Overlay on the actuator canvas
+
+        # Enable scroll bars for the timeline canvas
+        self.ui.scrollArea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.ui.scrollArea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Connect clear button to clear_plot method
+        self.ui.pushButton.clicked.connect(self.maincanvas.clear_plot)
+        
+        # Connect save button to save_current_signal method
+        self.ui.pushButton_2.clicked.connect(self.save_current_signal)
+
+        # Connect save button to save_current_signal method
+        self.ui.pushButton_3.clicked.connect(self.clear_canvas_and_timeline)
+
+        # Connect "Adjust Size" button to adjust_canvas_size method
+        self.pushButton_4.clicked.connect(self.adjust_canvas_size)
+
+        self.signal_counter = 1  # Counter for naming saved signals
+        self.actionCreate_New_Chain.triggered.connect(self.create_actuator_branch)
+
+        # Connect the import waveform action to the import_waveform method
+        self.ui.actionImport_Waveform.triggered.connect(self.import_waveform)
+
+        # Connect the actuator_added signal to the add_actuator_to_timeline slot
+        self.actuator_canvas.actuator_added.connect(self.add_actuator_to_timeline)
+
+        # Setup scroll area for timeline
+        self.timeline_layout = QVBoxLayout(self.ui.scrollAreaWidgetContents)
+
+        # Dictionary to store references to timeline widgets
+        self.timeline_widgets = {}
+
+        # Connect the properties_changed signal to the update_timeline_actuator slot
+        self.actuator_canvas.properties_changed.connect(self.update_timeline_actuator)
+        self.actuator_canvas.actuator_deleted.connect(self.remove_actuator_from_timeline)
+
+        # Create the PreviewCanvas and add it to widget_3
+        self.preview_canvas = PreviewCanvas(self.ui.widget_3, width=5, height=0.4, dpi=100)
+        self.preview_canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+
+        # Create a layout for widget_3 if not already present
+        layout = QtWidgets.QVBoxLayout(self.ui.widget_3)
+        layout.setContentsMargins(0, 0, 0, 0)  # Remove any margins
+        layout.setSpacing(0)  # Remove spacing between the canvas and the widget edges
+
+        # Add the PreviewCanvas to widget_3's layout
+        layout.addWidget(self.preview_canvas)
+
+        # Create a layout for widget_3 if not already present
+        self.ui.widget_3.setLayout(QtWidgets.QVBoxLayout())
+        
+        # Add the PreviewCanvas to widget_3's layout
+        self.ui.widget_3.layout().addWidget(self.preview_canvas)
+
+        # Ensure the tree widget itemClicked event is connected to update the preview
+        self.ui.treeWidget.itemClicked.connect(self.on_tree_item_clicked)
+
+        self.current_actuator = None  # Attribute to track the current actuator
+
+        self.actuator_canvas.actuator_added.connect(self.connect_actuator_signals)
+
+        # Connect the no_actuator_selected signal to the switch_to_main_canvas slot
+        self.actuator_canvas.no_actuator_selected.connect(self.switch_to_main_canvas)
+
+        # Add a dictionary to store signals for each actuator
+        self.actuator_signals = {}
+
+        # Initialize timeline_canvases as an empty dictionary
+        self.timeline_canvases = {}
+
+        # Instantiate DesignSaver
+        self.design_saver = DesignSaver(self.actuator_canvas, self.timeline_canvases, self.maincanvas, self)
+
+        # Connect the "Save As..." action to the save_design method
+        self.ui.actionSave_New_Design.triggered.connect(self.design_saver.save_design)
+
+        self.ui.actionStart_New_Design.triggered.connect(self.design_saver.load_design)
+
+
+        # Slider
+        # Create a QWidget that acts as a layer for the slider
+        self.slider_layer = QWidget(self.ui.scrollAreaWidgetContents)
+        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+        self.slider_layer.setStyleSheet("background: transparent;")
+        
+        # Add a vertical slider to float over the timeline layout
+        self.floating_slider = FloatingVerticalSlider(self.slider_layer)
+        self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
+
+        # Raise the slider so it's always on top
+        self.floating_slider.raise_()
+
+        # Install an event filter to track resizing and adjust the slider
+        self.ui.scrollAreaWidgetContents.installEventFilter(self)
+
+        # Connect mouse events to handle slider dragging
+        self.floating_slider.mousePressEvent = self.slider_mouse_press_event
+        self.floating_slider.mouseMoveEvent = self.slider_mouse_move_event
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Type.Resize and source is self.ui.scrollAreaWidgetContents:
+            # Adjust the slider layer to match the size of the scroll area content
+            self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
+            self.floating_slider.update_slider_height(self.ui.scrollAreaWidgetContents.height())
+        return super(Haptics_App, self).eventFilter(source, event)
+
+    def slider_mouse_press_event(self, event):
+        # Store the initial position when the slider is clicked
+        self.slider_start_pos = event.globalPosition().toPoint()
+        super(QSlider, self.floating_slider).mousePressEvent(event)
+
+    def slider_mouse_move_event(self, event):
+        # Calculate the horizontal movement based on the difference from the start position
+        delta_x = event.globalPosition().x() - self.slider_start_pos.x()
+        self.slider_start_pos = event.globalPosition().toPoint()
+
+        # Update the slider's horizontal position within the timeline layout
+        new_x = int(self.floating_slider.x() + delta_x)
+        max_x = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
+
+        # Ensure the slider stays within bounds
+        if new_x < 0:
+            new_x = 0
+        elif new_x > max_x:
+            new_x = max_x
+
+        # Move the slider to the new position
+        self.floating_slider.move(new_x, self.floating_slider.y())
+        super(QSlider, self.floating_slider).mouseMoveEvent(event)
+
+    def update_actuator_text(self):
+        # Find the global largest stop time across all actuators
+        all_stop_times = []
+        for signals in self.actuator_signals.values():
+            all_stop_times.extend([signal["stop_time"] for signal in signals])
+
+        if all_stop_times:
+            global_total_time = max(all_stop_times)
+        else:
+            global_total_time = 1  # Avoid division by zero in the width calculation
+
+        # Update the visual timeline for each actuator widget
+        for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
+            if actuator_id in self.actuator_signals:
+                signals = self.actuator_signals[actuator_id]
+
+                # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
+                # Assuming the first widget in the layout is the actuator label (ID and type)
+                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
+                    item = actuator_widget.layout().takeAt(i)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+                    else:
+                        del item  # Remove spacers
+
+                # Set up the layout for the actuator widget if not already done
+                if not actuator_widget.layout():
+                    layout = QtWidgets.QHBoxLayout()
+                    actuator_widget.setLayout(layout)
+                    layout.setContentsMargins(0, 0, 0, 0)
+                    layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
+
+                # Ensure the ID/Type label stays in the first position
+                if actuator_label.parent() is None:
+                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
+
+                # Create a container for the timeline and signal widgets
+                timeline_container = QtWidgets.QWidget(actuator_widget)
+                timeline_container.setStyleSheet("background-color: transparent;")
+                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
+                timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
+                timeline_layout.setContentsMargins(0, 0, 0, 0)
+                timeline_layout.setSpacing(0)
+
+                # Calculate the width of the actuator widget based on the global total time
+                widget_width = actuator_widget.size().width()
+
+                # Track the last stop time to insert gaps
+                last_stop_time = 0
+
+                # Sort signals by start time
+                signals.sort(key=lambda signal: signal["start_time"])
+
+                for signal in signals:
+                    # Calculate the relative width of the signal widget based on its duration
+                    signal_duration = signal["stop_time"] - signal["start_time"]
+                    signal_width_ratio = signal_duration / global_total_time
+                    signal_width = int(signal_width_ratio * widget_width)
+
+                    # Calculate the relative starting position of the signal widget
+                    signal_start_ratio = signal["start_time"] / global_total_time
+                    signal_start_position = int(signal_start_ratio * widget_width)
+
+                    # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
+                    if signal["start_time"] > last_stop_time:
+                        gap_duration = signal["start_time"] - last_stop_time
+                        gap_width_ratio = gap_duration / global_total_time
+                        gap_width = int(gap_width_ratio * widget_width)
+
+                        # Add a spacer to represent the gap
+                        spacer = QtWidgets.QSpacerItem(gap_width, 30, QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Minimum)
+                        timeline_layout.addItem(spacer)
+
+                    # Create the signal widget, making it smaller vertically and with rounded corners
+                    signal_widget = QtWidgets.QLabel(f'{signal["type"]} ({", ".join([f"{k}: {v}" for k, v in (signal["parameters"] or {}).items()])})')
+                    signal_widget.setFixedSize(signal_width, 30)  # Set smaller height for the signal widget
+                    signal_widget.setStyleSheet("""
+                        background-color: rgba(100, 150, 250, 150); 
+                        color: white; 
+                        border-radius: 7px;
+                        padding: 3px;
+                    """)
+
+                    # Add the signal widget to the layout
+                    timeline_layout.addWidget(signal_widget)
+
+                    # Update the last stop time
+                    last_stop_time = signal["stop_time"]
+
+                # Add a stretch to fill the remaining space
+                timeline_layout.addStretch()
+
+                # Add the timeline container to the actuator widget after the ID and type
+                actuator_widget.layout().addWidget(timeline_container)
+
+
+    def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
+        actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+        if actuator:
+            actuator.signal_handler.clicked.connect(self.on_actuator_clicked)
+            actuator.signal_handler.properties_changed.connect(self.update_plotter)
+
+
+    def update_plotter(self, actuator_id, actuator_type, color):
+        if self.current_actuator == actuator_id:
+            self.switch_to_timeline_canvas(actuator_id)  # Update the plotter to reflect changes
+
+
+    def switch_to_timeline_canvas(self, actuator_id):
+        # Clear the current layout
+        self.ui.gridLayout.removeWidget(self.maincanvas)
+        self.maincanvas.setParent(None)  # Detach MplCanvas from its parent
+
+        # Create and add the TimelineCanvas
+        color_rgb = self.actuator_canvas.branch_colors[actuator_id.split('.')[0]].getRgbF()[:3]
+        self.timeline_canvas = TimelineCanvas(self.ui.widget, color=color_rgb, label=f"Timeline for {actuator_id}", app_reference=self)
+        self.ui.gridLayout.addWidget(self.timeline_canvas, 0, 0, 1, 1)
+
+        # Store the TimelineCanvas in the dictionary
+        self.timeline_canvases[actuator_id] = self.timeline_canvas
+
+        # Retrieve and plot the signal data for this actuator
+        # Retrieve and plot the signal data for this actuator
+        if actuator_id in self.actuator_signals:
+            self.timeline_canvas.signals = self.actuator_signals[actuator_id]
+            self.timeline_canvas.plot_all_signals()
+
+    def switch_to_main_canvas(self):
+        # Check if already on MplCanvas, no need to switch if it is
+        if self.ui.gridLayout.indexOf(self.maincanvas) != -1:
+            return
+
+        # Remove the current widget (TimelineCanvas)
+        if hasattr(self, 'timeline_canvas'):
+            self.ui.gridLayout.removeWidget(self.timeline_canvas)
+            self.timeline_canvas.setParent(None)
+
+        # Add the MplCanvas back to the layout
+        self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
+        self.current_actuator = None  # Reset current actuator tracking
+
+    def on_actuator_clicked(self, actuator_id):
+        # When an actuator is clicked, switch to the TimelineCanvas
+        if self.current_actuator != actuator_id:
+            self.current_actuator = actuator_id
+            self.switch_to_timeline_canvas(actuator_id)
+            # Retrieve the actuator's type and color
+            actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
+            if actuator:
+                # Immediately update the plotter to reflect the clicked actuator
+                self.update_plotter(actuator_id, actuator.actuator_type, actuator.color.name())
+
+    def mousePressEvent(self, event):
+        # If clicked on blank space, switch back to MplCanvas
+        if self.current_actuator and not self.actuator_canvas.itemAt(event.pos()):
+            self.current_actuator = None
+            self.switch_to_main_canvas()
+        super().mousePressEvent(event)
+
+    def update_status_bar(self, signal_type, parameters):
+        # Format the parameters into a readable string
+        param_str = ', '.join([f'{key}: {value}' for key, value in parameters.items()])
+        # Display the signal type and parameters in the status bar
+        self.statusBar().showMessage(f"Current Signal: {signal_type} | Parameters: {param_str}")
+
+    def clear_canvas_and_timeline(self, bypass_dialog=False):
+        if not bypass_dialog:
+            # Prompt a warning to the user
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Clear Actuator and Timeline Data")
+            msg_box.setText("Are you sure you want to clear all the actuators and corresponding timeline data?")
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            # Apply the custom stylesheet for the message box
+            msg_box.setStyleSheet("""
+                QMessageBox { background-color: white; }
+                QLabel { color: black; }
+                QPushButton { 
+                    background-color: white; 
+                    color: black; 
+                    border: 1px solid black; 
+                    padding: 5px; 
+                }
+                QPushButton:hover { 
+                    background-color: gray; 
+                }
+            """)
+
+            result = msg_box.exec()
+
+            if result == QMessageBox.StandardButton.Yes:
+                # If user confirms, clear the canvas and timeline
+                self.actuator_canvas.clear_lines_except_scale()  # Clear lines, not the scale line
+                self.actuator_canvas.clear_canvas()  # Clear actuators
+                self.clear_timeline_canvas()  # Clear timeline
+                self.reset_color_management()
+                self.switch_to_main_canvas()
+                
+            else:
+                # If user cancels, do nothing
+                return
+        else:
+            # Bypass dialog and clear the canvas and timeline directly
+            self.actuator_canvas.clear_lines_except_scale()  # Clear lines, not the scale line
+            self.actuator_canvas.clear_canvas()  # Clear actuators
+            self.clear_timeline_canvas()  # Clear timeline
+            self.reset_color_management()
+            self.switch_to_main_canvas()
+
+
+    def clear_timeline_canvas(self):
+        # Clear the timeline layout
+        while self.timeline_layout.count() > 0:
+            item = self.timeline_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.timeline_widgets.clear()
+        self.actuator_signals.clear()  # Clear the stored signals
+
+    def reset_color_management(self):
+        # Reset color management stuff
+        self.actuator_canvas.branch_colors.clear()
+        self.actuator_canvas.color_index = 0
+
+    def adjust_canvas_size(self):
+        dialog = CanvasSizeDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                width = int(dialog.width_input.text())
+                height = int(dialog.height_input.text())
+                self.actuator_canvas.set_canvas_size(width, height)
+                self.actuator_canvas.update_scale_position()
+            except ValueError:
+                print("Invalid input. Please enter valid integer values for width and height.")
+    
+
+
+    def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
+        # Convert the color to a suitable format for the stylesheet
+        color_rgb = QColor(color).getRgbF()[:3]
+        color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
+
+        # Create a placeholder widget instead of TimelineCanvas
+        actuator_widget = QWidget(parent=self.ui.scrollAreaWidgetContents)
+        actuator_widget.setStyleSheet(color_style)  # Apply the background color
+
+        # Add a simple label to represent the actuator in the timeline area
+        actuator_layout = QHBoxLayout(actuator_widget)
+        actuator_label = QLabel(f"{actuator_type} - {new_id}")
+        actuator_label.setStyleSheet("color: white;")  # Ensure text is visible
+        actuator_layout.addWidget(actuator_label)
+        
+        # Add the widget to the timeline layout
+        self.timeline_layout.addWidget(actuator_widget)
+        self.timeline_widgets[new_id] = (actuator_widget, actuator_label)
+
+
+    def update_timeline_actuator(self, old_actuator_id, new_actuator_id, actuator_type, color):
+        if old_actuator_id in self.timeline_widgets:
+            actuator_widget, actuator_label = self.timeline_widgets.pop(old_actuator_id)
+            
+            # Convert the color to a suitable format for the stylesheet
+            color_rgb = QColor(color).getRgbF()[:3]
+            color_style = f"background-color: rgba({int(color_rgb[0]*255)}, {int(color_rgb[1]*255)}, {int(color_rgb[2]*255)}, 255);"
+            
+            # Update the widget's background color
+            actuator_widget.setStyleSheet(color_style)
+            
+            # Update the label text
+            actuator_label.setText(f"{actuator_type} - {new_actuator_id}")
+            
+            # Store the updated reference with the new ID
+            self.timeline_widgets[new_actuator_id] = (actuator_widget, actuator_label)
+            
+            # Update the actuator_signals dictionary to reflect the ID change
+            if old_actuator_id in self.actuator_signals:
+                self.actuator_signals[new_actuator_id] = self.actuator_signals.pop(old_actuator_id)
+
+            # Immediately update the plotter to reflect the changes
+            self.update_plotter(new_actuator_id, actuator_type, color)
+
+
+
+   
+            
+    def remove_actuator_from_timeline(self, actuator_id):
+        if actuator_id in self.timeline_widgets:
+            actuator_widget, actuator_label = self.timeline_widgets.pop(actuator_id)
+            self.timeline_layout.removeWidget(actuator_widget)
+            actuator_widget.deleteLater()  # Properly delete the widget
+        
+        # Remove the associated signal data
+        if actuator_id in self.actuator_signals:
+            del self.actuator_signals[actuator_id]
+
+
+    def import_waveform(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
+        if file_path:
+            try:
+                with open(file_path, 'r') as file:
+                    data = json.load(file)
+                    print(f"JSON Data: {json.dumps(data, indent=2)}")  # Debugging print statement
+                    # Assuming the waveform data is under 'value0' and is a list of y-values
+                    waveform = self.extract_waveform(data)
+                    if waveform is not None:
+                        data["data"] = waveform.tolist()
+                        self.add_imported_waveform(file_path, data)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to import waveform: {e}")
+
+    def add_imported_waveform(self, file_path, waveform_data):
+        imports_item = None
+        # Find or create the Imports item
+        for i in range(self.ui.treeWidget.topLevelItemCount()):
+            top_item = self.ui.treeWidget.topLevelItem(i)
+            if top_item.text(0) == "Imported Signals":
+                imports_item = top_item
+                break
+        if imports_item is None:
+            imports_item = QTreeWidgetItem(self.ui.treeWidget)
+            imports_item.setText(0, "Imported Signals")
+            imports_item.setToolTip(0, "Imported Signals")
+
+        waveform_name = os.path.basename(file_path)
+        child = QTreeWidgetItem(imports_item)
+        child.setText(0, waveform_name)
+        child.setToolTip(0, waveform_name)
+        self.imported_signals[waveform_name] = waveform_data
+        child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
+        child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
+
+    # No normalization (the one to use ****)
+    # def extract_waveform(self, data):
+    #     try:
+    #         # Extract gain and use it to generate a sine waveform
+    #         gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+    #         # Generate a simple sine wave using the gain value
+    #         t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
+    #         waveform = gain * np.sin(2 * np.pi * t)
+    #         print(f"Waveform length: {len(waveform)}")  # Debugging print statement
+    #         return waveform
+    #     except KeyError as e:
+    #         print(f"KeyError: {e}")
+    #         return None
+        
+    def extract_waveform(self, data):
+        try:
+            # Extract gain and use it to generate a sine waveform
+            gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+            
+            # Generate a simple sine wave using the gain value
+            t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
+            waveform = gain * np.sin(2 * np.pi * t)
+            
+            # Normalize the waveform from -500 to 500 range to -1 to 1
+            max_val = 500
+            min_val = -500
+            normalized_waveform = 2 * (waveform - min_val) / (max_val - min_val) - 1
+            
+            print(f"Normalized Waveform length: {len(normalized_waveform)}")  # Debugging print statement
+            return normalized_waveform
+        except KeyError as e:
+            print(f"KeyError: {e}")
+            return None
+
+
+    def create_actuator_branch(self):
+        dialog = CreateBranchDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            num_actuators = dialog.num_actuators_input.value()
+            lra_count = dialog.lra_input.value()
+            vca_count = dialog.vca_input.value()
+            m_count = dialog.m_input.value()
+            grid_pattern = dialog.grid_pattern_input.text()
+
+            self.actuator_canvas.create_actuator_branch(
+                num_actuators, lra_count, vca_count, m_count, grid_pattern)
+
+    def setup_tree_widget(self):
+        tree = self.ui.treeWidget
+        tree.setHeaderHidden(True)
+        tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: rgb(134, 150, 167);
+                color: rgb(240, 235, 229);
+            }
+            QToolTip {
+                color: rgb(134, 150, 167);  /* Text color */
+                background-color: rgba(0, 0, 0, 128);  /* Black background with transparency */
+                font-weight: bold;  /* Bold text */
+            }
+        """)
+        tree.setDragEnabled(True)
+
+        tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        tree.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        tree.setToolTipDuration(2000)  # Set tooltip duration to 2 seconds
+
+
+        # Disable drag by default
+        tree.setDragEnabled(False)
+
+        # Connect to itemPressed to control dragging behavior
+        tree.itemPressed.connect(self.on_tree_item_pressed)
+        
+        # Create top-level items
+        oscillators = QTreeWidgetItem(tree)
+        oscillators.setText(0, "Oscillators")
+        oscillators.setToolTip(0, "Oscillators")  # Set tooltip
+
+        envelopes = QTreeWidgetItem(tree)
+        envelopes.setText(0, "Envelopes")
+        envelopes.setToolTip(0, "Envelopes")  # Set tooltip
+
+        self.customizes = QTreeWidgetItem(tree)
+        self.customizes.setText(0, "Customized Signals")
+        self.customizes.setToolTip(0, "Customized Signals")  # Set tooltip
+
+        self.imports = QTreeWidgetItem(tree)
+        self.imports.setText(0, "Imported Signals")
+        self.imports.setToolTip(0, "Imported Signals")  # Set tooltip
+
+        # Add child items to "Oscillators"
+        osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
+        for item in osc_items:
+            child = QTreeWidgetItem(oscillators)
+            child.setText(0, item)
+            child.setToolTip(0, item)  # Set tooltip
+            self.signal_templates[item] = self.generate_signal(item)
+
+        # Add child items to "Envelopes"
+        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]
+        for item in env_items:
+            child = QTreeWidgetItem(envelopes)
+            child.setText(0, item)
+            child.setToolTip(0, item)  # Set tooltip
+            self.signal_templates[item] = self.generate_signal(item)
+
+        # Expand all items by default
+        tree.expandAll()
+
+        # Connect tree widget item selection to the plotting function
+        tree.itemClicked.connect(self.on_tree_item_clicked)
+
+        # Connect the itemChanged signal to handle renaming
+        tree.itemChanged.connect(self.on_tree_item_changed)
+
+        # Enable context menu
+        tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        tree.customContextMenuRequested.connect(self.on_custom_context_menu)
+
+    def on_tree_item_pressed(self, item, column):
+        # Enable dragging only if the item is a child item (i.e., it has a parent)
+        if item.parent() is not None:
+            self.ui.treeWidget.setDragEnabled(True)
+        else:
+            self.ui.treeWidget.setDragEnabled(False)
+
+    @pyqtSlot(QTreeWidgetItem, int)
+    def on_tree_item_clicked(self, item, column):
+        if item is None or not isinstance(item, QTreeWidgetItem):
+            return  # Exit if the clicked item is None or not a valid item
+        
+        signal_type = item.text(column)
+        if signal_type in self.custom_signals:  # Check if it's a custom signal
+            custom_signal = self.custom_signals.get(signal_type)
+            if custom_signal is not None:
+                self.preview_canvas.plot_default_signal(custom_signal)
+        elif signal_type in self.signal_templates:  # Check if it's a provided signal template
+            template_signal = self.signal_templates.get(signal_type)
+            if template_signal is not None:
+                self.preview_canvas.plot_default_signal(template_signal)
+        elif signal_type in self.imported_signals:  # Check if it's an imported signal
+            imported_signal = self.imported_signals.get(signal_type)
+            if imported_signal is not None:
+                self.preview_canvas.plot_default_signal(imported_signal)
+        else:
+            self.preview_canvas.plot_default_signal(None)  # Clear the preview canvas if no valid signal is found
+
+
+    def generate_signal(self, signal_type):
+        base_signal = {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": 628.3185307179587,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": []
+        }
+
+        t = np.linspace(0, 1, 500).tolist()  # Convert numpy array to list
+        if signal_type == "Sine":
+            base_signal["data"] = np.sin(2 * np.pi * 10 * np.array(t)).tolist()
+        elif signal_type == "Square":
+            base_signal["data"] = np.sign(np.sin(2 * np.pi * 10 * np.array(t))).tolist()
+        elif signal_type == "Saw":
+            base_signal["data"] = (2 * (np.array(t) - np.floor(np.array(t) + 0.5))).tolist()
+        elif signal_type == "Triangle":
+            base_signal["data"] = (2 * np.abs(2 * (np.array(t) - np.floor(np.array(t) + 0.5))) - 1).tolist()
+        elif signal_type == "Chirp":
+            base_signal["data"] = (np.sin(2 * np.pi * np.array(t)**2)).tolist()
+        elif signal_type == "FM":
+            base_signal["data"] = (np.sin(2 * np.pi * (10 * np.array(t) + np.sin(2 * np.pi * 0.5 * np.array(t))))).tolist()
+        elif signal_type == "PWM":
+            base_signal["data"] = (np.where(np.sin(2 * np.pi * 10 * np.array(t)) >= 0, 1, -1)).tolist()
+        elif signal_type == "Noise":
+            base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
+        elif signal_type == "Envelope":
+            base_signal["data"] = (np.linspace(0, 1, 500) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
+        elif signal_type == "Keyed Envelope":
+            base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
+        elif signal_type == "ASR":
+            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.3, np.array(t) >= 0.3], [lambda t: 3.33 * t, 1])).tolist()
+        elif signal_type == "ADSR":
+            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.1, np.array(t) < 0.2, np.array(t) < 0.5, np.array(t) < 0.7, np.array(t) >= 0.7], [lambda t: 10 * t, lambda t: 1 - 5 * (t - 0.1), 0.5, lambda t: 0.5 - 0.25 * (t - 0.5), 0.25])).tolist()
+        elif signal_type == "Exponential Decay":
+            base_signal["data"] = (np.exp(-5 * np.array(t))).tolist()
+        elif signal_type == "PolyBezier":
+            base_signal["data"] = (np.array(t)**3 - 3 * np.array(t)**2 + 3 * np.array(t)).tolist()
+        elif signal_type == "Signal Envelope":
+            base_signal["data"] = (np.abs(np.sin(2 * np.pi * 3 * np.array(t)))).tolist()
+        elif signal_type in self.custom_signals:  # Check if it's a custom signal
+            base_signal["data"] = self.custom_signals.get(signal_type, {"data": np.zeros_like(t).tolist()})["data"]
+        else:
+            base_signal["data"] = np.zeros_like(t).tolist()
+
+        return base_signal
+
+    def add_signal(self, signal_type, combine):
+        new_signal = self.generate_signal(signal_type)
+        print(new_signal)
+        self.maincanvas.add_signal(new_signal, combine=combine)
+
+    def signal_exists(self, signal):
+        for existing_signal in self.custom_signals.values():
+            if np.array_equal(existing_signal, signal):
+                return True
+        for existing_signal in self.signal_templates.values():
+            if np.array_equal(existing_signal, signal):
+                return True
+        return False
+
+    def save_current_signal(self):
+        print("start save")
+        print("save",self.first_signal_drop)
+        # Check if the first signal has been saved
+        if self.first_signal_drop == 1:
+            print("first signal")
+            # Always prompt "Signal already exists" for the first signal and do not save it
+            QMessageBox.information(self, "Reminder", "Signal already exists!", QMessageBox.StandardButton.Ok)
+            # self.first_signal_drop = False  # Set the flag to False after the first attempt
+            return  # Do not proceed with saving the signal
+
+        # Continue with saving for subsequent signals
+        if self.maincanvas.current_signal is not None:
+            signal_data = {
+                "value0": {
+                    "gain": 1.0,
+                    "bias": 0.0,
+                    "m_ptr": {
+                        "polymorphic_id": 2147483649,
+                        "polymorphic_name": f"tact::Signal::Model<tact::Custom>",
+                        "ptr_wrapper": {
+                            "valid": 1,
+                            "data": {
+                                "Concept": {},
+                                "m_model": {
+                                    "IOscillator": {
+                                        "x": {
+                                            "gain": 628.3185307179587,
+                                            "bias": 0.0,
+                                            "m_ptr": {
+                                                "polymorphic_id": 2147483650,
+                                                "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                                "ptr_wrapper": {
+                                                    "valid": 1,
+                                                    "data": {
+                                                        "Concept": {},
+                                                        "m_model": {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "data": self.maincanvas.current_signal.tolist()
+            }
+            
+            if self.signal_exists(signal_data):
+                QMessageBox.information(self, "Reminder", "Signal already exists!", QMessageBox.StandardButton.Ok)
+            else:
+                signal_name = f"Signal {self.signal_counter}"
+                self.signal_counter += 1
+                child = QTreeWidgetItem(self.customizes)
+                child.setText(0, signal_name)
+                child.setToolTip(0, signal_name)  # Set tooltip
+                child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
+                child.setData(0, QtCore.Qt.ItemDataRole.UserRole, signal_name)  # Store the original name
+                self.customizes.addChild(child)
+                self.custom_signals[signal_name] = signal_data  # Save the signal data
+
+
+    @pyqtSlot(QTreeWidgetItem, int)
+    def on_tree_item_changed(self, item, column):
+        old_name = item.data(column, QtCore.Qt.ItemDataRole.UserRole)
+        new_name = item.text(column)
+        if item.parent() == self.customizes and old_name in self.custom_signals:
+            self.custom_signals[new_name] = self.custom_signals.pop(old_name)
+            item.setData(column, QtCore.Qt.ItemDataRole.UserRole, new_name)
+            item.setToolTip(0, new_name)  # Update tooltip
+        elif item.parent() and item.parent().text(0) == "Imported Signals" and old_name in self.imported_signals:
+            self.imported_signals[new_name] = self.imported_signals.pop(old_name)
+            item.setData(column, QtCore.Qt.ItemDataRole.UserRole, new_name)
+            item.setToolTip(0, new_name)  # Update tooltip
+
+    def delete_tree_item(self, item):
+        signal_name = item.text(0)
+        if item.parent() == self.customizes:
+            if signal_name in self.custom_signals:
+                del self.custom_signals[signal_name]
+            index = self.customizes.indexOfChild(item)
+            if index != -1:
+                self.customizes.takeChild(index)
+        elif item.parent() and item.parent().text(0) == "Imported Signals":
+            if signal_name in self.imported_signals:
+                del self.imported_signals[signal_name]
+            index = item.parent().indexOfChild(item)
+            if index != -1:
+                item.parent().takeChild(index)
+                
+    @pyqtSlot(QtCore.QPoint)
+    def on_custom_context_menu(self, point):
+        item = self.ui.treeWidget.itemAt(point)
+        if item:
+            menu = QtWidgets.QMenu(self)
+            delete_action = menu.addAction("Delete")
+            rename_action = menu.addAction("Rename")
+
+            action = menu.exec(self.ui.treeWidget.mapToGlobal(point))
+
+            if action == delete_action:
+                self.delete_tree_item(item)
+            elif action == rename_action:
+                self.ui.treeWidget.editItem(item)
+
+    def delete_custom_signal(self, item):
+        signal_name = item.text(0)
+        if signal_name in self.custom_signals:
+            del self.custom_signals[signal_name]
+        index = self.customizes.indexOfChild(item)
+        if index != -1:
+            self.customizes.takeChild(index)
