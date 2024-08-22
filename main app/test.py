@@ -65,7 +65,7 @@ class DesignSaver:
                     'mpl_canvas_data': self.collect_mpl_canvas_data(),
                     'current_actuator': self.app_reference.current_actuator,
                     'actuator_signals': self.app_reference.actuator_signals,
-                    'tree_widget_data': self.collect_tree_widget_data(),  # Add this line
+                    'tree_widget_data': self.collect_tree_widget_data(),
                 }
 
                 with open(file_name, 'wb') as file:
@@ -94,10 +94,9 @@ class DesignSaver:
                 self.apply_mpl_canvas_data(design_data.get('mpl_canvas_data', {}))
                 self.app_reference.current_actuator = design_data.get('current_actuator')
                 self.app_reference.actuator_signals = design_data.get('actuator_signals', {})
-                self.apply_tree_widget_data(design_data.get('tree_widget_data', {}))  # Add this line
+                self.apply_tree_widget_data(design_data.get('tree_widget_data', {}))
 
                 self.actuator_canvas.redraw_all_lines()
-                #self.app_reference.update_actuator_text()
                 
                 if self.app_reference.current_actuator:
                     self.app_reference.switch_to_timeline_canvas(self.app_reference.current_actuator)
@@ -105,17 +104,17 @@ class DesignSaver:
                     self.app_reference.switch_to_main_canvas()
 
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
+                self.app_reference.update_actuator_text()
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
-        self.app_reference.update_actuator_text()
 
     def collect_tree_widget_data(self):
         tree_data = {}
         root = self.app_reference.ui.treeWidget.invisibleRootItem()
         for i in range(root.childCount()):
             top_level_item = root.child(i)
-            if top_level_item.text(0) == "Imported Signals":
-                tree_data["Imported Signals"] = self.collect_child_items(top_level_item)
+            if top_level_item.text(0) in ["Imported Signals", "Customized Signals"]:
+                tree_data[top_level_item.text(0)] = self.collect_child_items(top_level_item)
         return tree_data
     
     def collect_child_items(self, parent_item):
@@ -131,27 +130,29 @@ class DesignSaver:
 
     def apply_tree_widget_data(self, tree_data):
         root = self.app_reference.ui.treeWidget.invisibleRootItem()
-        imports_item = None
-        for i in range(root.childCount()):
-            top_level_item = root.child(i)
-            if top_level_item.text(0) == "Imported Signals":
-                imports_item = top_level_item
-                break
         
-        if imports_item is None:
-            imports_item = QTreeWidgetItem(self.app_reference.ui.treeWidget)
-            imports_item.setText(0, "Imported Signals")
+        for category in ["Imported Signals", "Customized Signals"]:
+            category_item = None
+            for i in range(root.childCount()):
+                top_level_item = root.child(i)
+                if top_level_item.text(0) == category:
+                    category_item = top_level_item
+                    break
+            
+            if category_item is None:
+                category_item = QTreeWidgetItem(self.app_reference.ui.treeWidget)
+                category_item.setText(0, category)
 
-        imports_item.takeChildren()  # Clear existing children
-        
-        for item_data in tree_data.get("Imported Signals", []):
-            child = QTreeWidgetItem(imports_item)
-            child.setText(0, item_data['text'])
-            child.setToolTip(0, item_data['tooltip'])
-            child.setData(0, QtCore.Qt.ItemDataRole.UserRole, item_data['user_data'])
-            child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+            category_item.takeChildren()  # Clear existing children
+            
+            for item_data in tree_data.get(category, []):
+                child = QTreeWidgetItem(category_item)
+                child.setText(0, item_data['text'])
+                child.setToolTip(0, item_data['tooltip'])
+                child.setData(0, QtCore.Qt.ItemDataRole.UserRole, item_data['user_data'])
+                child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
 
-        self.app_reference.ui.treeWidget.expandItem(imports_item)
+            self.app_reference.ui.treeWidget.expandItem(category_item)
 
     def collect_actuator_data(self):
         return [{
