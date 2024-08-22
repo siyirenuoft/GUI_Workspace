@@ -37,7 +37,6 @@ class DesignSaver:
         self.app_reference = app_reference
 
     def prompt_save_before_loading(self):
-        """Prompt the user to save the current design before loading a new one."""
         response = QMessageBox.question(
             None,
             "Save Current Design",
@@ -46,26 +45,29 @@ class DesignSaver:
         )
         
         if response == QMessageBox.StandardButton.Yes:
-            self.save_design()  # Call save_design if the user wants to save
-            return True  # Continue with loading
+            self.save_design()
+            return True
         elif response == QMessageBox.StandardButton.No:
-            return True  # Proceed without saving
+            return True
         else:
-            return False  # Cancel the load operation
-
-    def reset_app(self):
-        """Resets the entire app to its default state."""
-        self.app_reference.clear_canvas_and_timeline(bypass_dialog=True)
-        print("Actuators and Timeline Cleared")
-        self.mpl_canvas.clear_plot()
-        self.app_reference.imported_signals.clear()
-        print("Imported Signals Cleared")
+            return False
 
     def save_design(self):
-        file_name, _ = QFileDialog.getSaveFileName(None, "Save As", "", "Design Files (*.dsgn)")
+        file_name, _ = QFileDialog.getSaveFileName(None, "Save Design As", "", "Design Files (*.dsgn)")
         if file_name:
             try:
-                design_data = self.collect_design_data()
+                design_data = {
+                    'actuators': self.collect_actuator_data(),
+                    'timeline': self.collect_timeline_data(),
+                    'imported_signals': self.app_reference.imported_signals,
+                    'custom_signals': self.app_reference.custom_signals,
+                    'branch_colors': self.actuator_canvas.branch_colors,
+                    'mpl_canvas_data': self.collect_mpl_canvas_data(),
+                    'current_actuator': self.app_reference.current_actuator,
+                    'actuator_signals': self.app_reference.actuator_signals,
+                    'tree_widget_data': self.collect_tree_widget_data(),  # Add this line
+                }
+
                 with open(file_name, 'wb') as file:
                     pickle.dump(design_data, file)
                 QMessageBox.information(None, "Success", "Design saved successfully!")
@@ -73,126 +75,151 @@ class DesignSaver:
                 QMessageBox.warning(None, "Error", f"Failed to save design: {str(e)}")
 
     def load_design(self):
-        # Ask user if they want to save current design before loading
         if not self.prompt_save_before_loading():
-            return  # User canceled the load operation
+            return
 
-        # Clear current state before loading the new design
-        self.reset_app()
-
-        # Proceed with loading the new design
         file_name, _ = QFileDialog.getOpenFileName(None, "Open Design", "", "Design Files (*.dsgn)")
         if file_name:
             try:
                 with open(file_name, 'rb') as file:
                     design_data = pickle.load(file)
-                self.apply_design_data(design_data)
+
+                self.app_reference.clear_canvas_and_timeline(bypass_dialog=True)
+                
+                self.apply_actuator_data(design_data['actuators'])
+                self.apply_timeline_data(design_data['timeline'])
+                self.app_reference.imported_signals = design_data.get('imported_signals', {})
+                self.app_reference.custom_signals = design_data.get('custom_signals', {})
+                self.actuator_canvas.branch_colors = design_data.get('branch_colors', {})
+                self.apply_mpl_canvas_data(design_data.get('mpl_canvas_data', {}))
+                self.app_reference.current_actuator = design_data.get('current_actuator')
+                self.app_reference.actuator_signals = design_data.get('actuator_signals', {})
+                self.apply_tree_widget_data(design_data.get('tree_widget_data', {}))  # Add this line
+
+                self.actuator_canvas.redraw_all_lines()
+                #self.app_reference.update_actuator_text()
+                
+                if self.app_reference.current_actuator:
+                    self.app_reference.switch_to_timeline_canvas(self.app_reference.current_actuator)
+                else:
+                    self.app_reference.switch_to_main_canvas()
+
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
+        self.app_reference.update_actuator_text()
 
-    def collect_design_data(self):
-        # Collect data from Actuator Canvas
-        actuator_data = []
-        for actuator in self.actuator_canvas.actuators:
-            actuator_data.append({
-                'id': actuator.id,
-                'type': actuator.actuator_type,
-                'color': actuator.color.name(),
-                'position': (actuator.pos().x(), actuator.pos().y()),
-                'predecessor': actuator.predecessor,
-                'successor': actuator.successor
+    def collect_tree_widget_data(self):
+        tree_data = {}
+        root = self.app_reference.ui.treeWidget.invisibleRootItem()
+        for i in range(root.childCount()):
+            top_level_item = root.child(i)
+            if top_level_item.text(0) == "Imported Signals":
+                tree_data["Imported Signals"] = self.collect_child_items(top_level_item)
+        return tree_data
+    
+    def collect_child_items(self, parent_item):
+        items = []
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            items.append({
+                'text': child.text(0),
+                'tooltip': child.toolTip(0),
+                'user_data': child.data(0, QtCore.Qt.ItemDataRole.UserRole)
             })
+        return items
+
+    def apply_tree_widget_data(self, tree_data):
+        root = self.app_reference.ui.treeWidget.invisibleRootItem()
+        imports_item = None
+        for i in range(root.childCount()):
+            top_level_item = root.child(i)
+            if top_level_item.text(0) == "Imported Signals":
+                imports_item = top_level_item
+                break
         
-        # Collect data from Timeline Canvases
+        if imports_item is None:
+            imports_item = QTreeWidgetItem(self.app_reference.ui.treeWidget)
+            imports_item.setText(0, "Imported Signals")
+
+        imports_item.takeChildren()  # Clear existing children
+        
+        for item_data in tree_data.get("Imported Signals", []):
+            child = QTreeWidgetItem(imports_item)
+            child.setText(0, item_data['text'])
+            child.setToolTip(0, item_data['tooltip'])
+            child.setData(0, QtCore.Qt.ItemDataRole.UserRole, item_data['user_data'])
+            child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+
+        self.app_reference.ui.treeWidget.expandItem(imports_item)
+
+    def collect_actuator_data(self):
+        return [{
+            'id': actuator.id,
+            'type': actuator.actuator_type,
+            'color': actuator.color.name(),
+            'position': (actuator.pos().x(), actuator.pos().y()),
+            'predecessor': actuator.predecessor,
+            'successor': actuator.successor
+        } for actuator in self.actuator_canvas.actuators]
+
+    def collect_timeline_data(self):
         timeline_data = []
         for actuator_id, timeline_canvas in self.timeline_canvases.items():
-            for signal in timeline_canvas.signals:
-                timeline_data.append({
-                    'actuator_id': actuator_id,  # Include actuator ID to link the signal to its actuator
-                    'type': signal["type"],
-                    'start_time': signal["start_time"],
-                    'stop_time': signal["stop_time"],
-                    'data': signal["data"],
-                    'parameters': signal["parameters"]
-                })
-        
-        # Collect imported signals from MplCanvas
-        mpl_data = []
-        for signal_name, signal_data in self.app_reference.imported_signals.items():
-            mpl_data.append({
-                'name': signal_name,
-                'data': signal_data
-            })
-        
-        # Collect custom signals
-        custom_signals_data = []
-        for signal_name, signal_data in self.app_reference.custom_signals.items():
-            custom_signals_data.append({
-                'name': signal_name,
-                'data': signal_data
-            })
+            timeline_data.extend([{
+                'actuator_id': actuator_id,
+                'type': signal["type"],
+                'start_time': signal["start_time"],
+                'stop_time': signal["stop_time"],
+                'data': signal["data"],
+                'parameters': signal["parameters"]
+            } for signal in timeline_canvas.signals])
+        return timeline_data
 
-        # Collect branch colors from ActuatorCanvas
-        branch_colors_data = {
-            actuator_id: color.name() for actuator_id, color in self.actuator_canvas.branch_colors.items()
+    def collect_mpl_canvas_data(self):
+        return {
+            'current_signal': self.mpl_canvas.current_signal.tolist() if self.mpl_canvas.current_signal is not None else None,
         }
 
-        # Combine all data into a dictionary
-        design_data = {
-            'actuators': actuator_data,
-            'timeline': timeline_data,
-            'mpl_signals': mpl_data,
-            'custom_signals': custom_signals_data,
-            'branch_colors': branch_colors_data
-        }
-        return design_data
-
-    def apply_design_data(self, design_data):
-        # Clear existing canvases
-        self.reset_app()
-
-        # Restore actuators
-        for actuator_info in design_data['actuators']:
+    def apply_actuator_data(self, actuator_data):
+        self.actuator_canvas.clear_canvas()
+        for actuator_info in actuator_data:
             x, y = actuator_info['position']
-            self.actuator_canvas.add_actuator(x, y, new_id=actuator_info['id'], 
-                                            actuator_type=actuator_info['type'], 
-                                            predecessor=actuator_info['predecessor'], 
-                                            successor=actuator_info['successor'])
+            self.actuator_canvas.add_actuator(
+                x, y, 
+                new_id=actuator_info['id'], 
+                actuator_type=actuator_info['type'], 
+                predecessor=actuator_info['predecessor'], 
+                successor=actuator_info['successor']
+            )
 
-        # Restore timeline signals
-        for signal_info in design_data['timeline']:
+    def apply_timeline_data(self, timeline_data):
+        self.app_reference.actuator_signals.clear()
+        for signal_info in timeline_data:
             actuator_id = signal_info['actuator_id']
+            if actuator_id not in self.app_reference.actuator_signals:
+                self.app_reference.actuator_signals[actuator_id] = []
             
-            # Ensure the timeline canvas is created for this actuator
-            #self.app_reference.switch_to_timeline_canvas(actuator_id)
+            self.app_reference.actuator_signals[actuator_id].append({
+                'type': signal_info['type'],
+                'start_time': signal_info['start_time'],
+                'stop_time': signal_info['stop_time'],
+                'data': signal_info['data'],
+                'parameters': signal_info['parameters']
+            })
 
-            # Retrieve the corresponding timeline canvas
-            corresponding_timeline_canvas = self.timeline_canvases.get(actuator_id)
-            print("timelinecanvas", self.timeline_canvases)
-            print("corresponding_timeline_canvas", corresponding_timeline_canvas)
-            if corresponding_timeline_canvas:
-                # Add the signal to the timeline canvas
-                corresponding_timeline_canvas.record_signal(signal_info['type'], signal_info['data'], 
-                                                            signal_info['start_time'], signal_info['stop_time'], 
-                                                            signal_info['parameters'])
-                corresponding_timeline_canvas.plot_all_signals()
+        for actuator_id, signals in self.app_reference.actuator_signals.items():
+            if actuator_id in self.timeline_canvases:
+                self.timeline_canvases[actuator_id].signals = signals
+                self.timeline_canvases[actuator_id].plot_all_signals()
+                
 
-        # Restore imported signals in MplCanvas
-        for signal_info in design_data['mpl_signals']:
-            self.app_reference.imported_signals[signal_info['name']] = signal_info['data']
-
-        # Restore custom signals
-        for signal_info in design_data['custom_signals']:
-            self.app_reference.custom_signals[signal_info['name']] = signal_info['data']
-
-        # Restore branch colors
-        for actuator_id, color in design_data['branch_colors'].items():
-            self.actuator_canvas.branch_colors[actuator_id] = QColor(color)
-
-        # Redraw all canvases and lines
-        self.actuator_canvas.redraw_all_lines()
-        self.mpl_canvas.plot([], [])  # Redraw the MplCanvas
+    def apply_mpl_canvas_data(self, mpl_data):
+        if mpl_data['current_signal']:
+            self.mpl_canvas.current_signal = np.array(mpl_data['current_signal'])
+            self.mpl_canvas.plot(np.linspace(0, 1, len(self.mpl_canvas.current_signal)), self.mpl_canvas.current_signal)
+        else:
+            self.mpl_canvas.clear_plot()
 
 
 class MplCanvas(FigureCanvas):
