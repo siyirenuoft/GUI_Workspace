@@ -1578,6 +1578,97 @@ class ActuatorCanvas(QGraphicsView):
             elif isinstance(item, QGraphicsTextItem) and item != self.scale_text:
                 self.scene.removeItem(item)
 
+    def highlight_actuators_at_time(self, time_position):
+            # print("here!!")
+            for actuator in self.actuators:
+                signals = self.haptics_app.actuator_signals.get(actuator.id, [])
+                is_active = any(signal["start_time"] <= time_position <= signal["stop_time"] for signal in signals)
+                if is_active:
+                    # print("here!!!!")
+                    actuator.setSelected(True)  # Highlight the actuator
+                else:
+                    actuator.setSelected(False)  # Remove highlight
+            self.update()  # Ensure the canvas is updated
+
+class FloatingVerticalSlider(QSlider):
+    def __init__(self, parent=None, app_reference=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.app_reference = app_reference  # Store the reference to the main app
+        self.setFixedWidth(10)
+        self.setStyleSheet("background-color: gray;")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
+        self.slider_start_pos = None
+        self.slider_movable = True  # Add a flag to control movement
+
+        # Calculate the minimum x position (3 cm from the left edge)
+        dpi = self.logicalDpiX()  # Get the screen DPI
+        self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+
+        self.global_total_time = None
+
+    def set_slider_movable(self, movable):
+        """Set whether the slider is movable horizontally."""
+        self.slider_movable = movable
+
+    def update_slider_height(self, height):
+        self.setFixedHeight(height)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.slider_start_pos = event.globalPosition().toPoint()
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not self.slider_movable:
+            event.ignore()  # Ignore movement events to prevent moving the slider
+            return
+
+        if event.buttons() & Qt.MouseButton.LeftButton and self.slider_start_pos is not None:
+            delta_x = event.globalPosition().x() - self.slider_start_pos.x()
+            self.slider_start_pos = event.globalPosition().toPoint()
+
+            new_x = int(self.x() + delta_x)
+            max_x = self.parent().width() - self.width()
+
+            # Prevent dragging before the 3 cm position
+            new_x = max(new_x, int(self.cm_to_pixels))
+
+            # Keep the slider within bounds
+            if new_x > max_x:
+                new_x = max_x
+
+            # Move the slider
+            self.move(new_x, self.y())
+
+            # Update actuator highlights based on the slider's new position
+            self.update_actuator_highlight(new_x)
+
+            super().mouseMoveEvent(event)
+
+
+    def update_actuator_highlight(self, slider_position):
+        adjusted_width = self.parent().width() - self.cm_to_pixels
+        new_pos = slider_position - self.cm_to_pixels
+        
+        # Ensure the global total time is valid
+        if self.global_total_time is None:
+            # Find the global largest stop time across all actuators
+            all_stop_times = []
+            for signals in self.app_reference.actuator_signals.values():
+                all_stop_times.extend([signal["stop_time"] for signal in signals])
+            
+            if all_stop_times:
+                self.global_total_time = max(all_stop_times)
+            else:
+                print("Warning: Total time is not set or invalid.")
+
+        if self.global_total_time is not None and self.global_total_time > 0:
+            time_position = (new_pos / adjusted_width) * self.global_total_time
+            self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
+        else:
+            print("Warning: app_reference or global_total_time is missing.")
+
+
 class SelectionBarView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(parent)
@@ -2688,6 +2779,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.clear_timeline_canvas()  # Clear timeline
                 self.reset_color_management()
                 self.switch_to_main_canvas()
+                self.update_pushButton_5_state()
                 
             else:
                 # If user cancels, do nothing
