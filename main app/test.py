@@ -1026,9 +1026,9 @@ class ActuatorCanvas(QGraphicsView):
         # Iterate through all actuators and draw lines when both conditions are met
         for actuator in self.actuators:
             # Check if an actuator's predecessor and successor are the same
-            if (actuator.predecessor == actuator.successor) and (actuator.predecessor is not None):
-                self.generate_same_predecessor_successor_warning(actuator.id)
-                continue  # Skip drawing the line for this actuator
+            #if (actuator.predecessor == actuator.successor) and (actuator.predecessor is not None):
+            #    self.generate_same_predecessor_successor_warning(actuator.id)
+            #    continue  # Skip drawing the line for this actuator
 
             # Check for topology conflicts
             if actuator.predecessor:
@@ -1084,7 +1084,6 @@ class ActuatorCanvas(QGraphicsView):
             "Please check the configuration."
         )
         QMessageBox.warning(self, "Topology Conflict", message)
-        print(message)  # Optional: Also print the message to the console for debugging
 
     def generate_same_predecessor_successor_warning(self, actuator_id):
         """Generate a warning message for an actuator with the same predecessor and successor."""
@@ -1094,7 +1093,6 @@ class ActuatorCanvas(QGraphicsView):
             "Please check the configuration."
         )
         QMessageBox.warning(self, "Configuration Error", message)
-        print(message)  # Optional: Also print the message to the console for debugging
 
 
 
@@ -1296,7 +1294,8 @@ class ActuatorCanvas(QGraphicsView):
             # Example of using QPixmap if applicable
             pixmap = QPixmap(100, 100)  # Ensure pixmap is properly initialized
             if pixmap.isNull():
-                print("Error: QPixmap is null")
+                # print("Error: QPixmap is null")
+                pass
             else:
                 scaled_pixmap = pixmap.scaled(50, 50, Qt.AspectRatioMode.KeepAspectRatio)
                 drag = QDrag(self)
@@ -1389,13 +1388,13 @@ class ActuatorCanvas(QGraphicsView):
                 new_branch = new_id.split('.')[0]
                 if old_branch != new_branch:
                     if actuator.predecessor:
-                        print("pred", actuator.predecessor)
+                        #print("pred", actuator.predecessor)
                         predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
                         if predecessor_actuator:
                             predecessor_actuator.successor = None
                         
                     if actuator.successor:
-                        print("succ", actuator.successor)
+                        #print("succ", actuator.successor)
                         successor_actuator = self.get_actuator_by_id(actuator.successor)
                         if successor_actuator:
                             successor_actuator.predecessor = None
@@ -1609,6 +1608,7 @@ class ActuatorPropertiesDialog(QDialog):
 
         form_layout = QFormLayout()
         self.id_input = QLineEdit(actuator.id)
+        self.id_input.textChanged.connect(self.format_input)
         form_layout.addRow("ID:", self.id_input)
 
         type_layout = QHBoxLayout()
@@ -1625,8 +1625,11 @@ class ActuatorPropertiesDialog(QDialog):
         form_layout.addRow("Type:", type_layout)
 
         self.predecessor_input = QLineEdit(actuator.predecessor or "")
-        self.successor_input = QLineEdit(actuator.successor or "")
+        self.predecessor_input.textChanged.connect(self.format_input)
         form_layout.addRow("Predecessor:", self.predecessor_input)
+
+        self.successor_input = QLineEdit(actuator.successor or "")
+        self.successor_input.textChanged.connect(self.format_input)
         form_layout.addRow("Successor:", self.successor_input)
 
         self.layout.addLayout(form_layout)
@@ -1652,6 +1655,44 @@ class ActuatorPropertiesDialog(QDialog):
             return "VCA"
         else:
             return "M"
+
+    def format_input(self):
+        sender = self.sender()
+        cursor_position = sender.cursorPosition()
+        text = sender.text()
+        formatted_text = self.format_text(text)
+        
+        if formatted_text != text:
+            # Check if a dot was added
+            dot_added = ('.' in formatted_text) and ('.' not in text)
+            
+            sender.setText(formatted_text)
+            
+            # Adjust cursor position
+            if dot_added and cursor_position > len(formatted_text.split('.')[0]):
+                new_cursor_position = min(cursor_position + 1, len(formatted_text))
+            else:
+                new_cursor_position = min(cursor_position, len(formatted_text))
+            
+            sender.setCursorPosition(new_cursor_position)
+
+    def format_text(self, text):
+        # Remove any existing dots
+        text = text.replace('.', '')
+        
+        # Split the text into letters and numbers
+        letters = ''.join(filter(str.isalpha, text)).upper()
+        numbers = ''.join(filter(str.isdigit, text))
+        
+        # Combine letters and numbers with a dot
+        if letters and numbers:
+            return f"{letters}.{numbers}"
+        elif letters:
+            return letters
+        elif numbers:
+            return f"A.{numbers}"
+        else:
+            return ""
 
 class CreateBranchDialog(QDialog):
     def __init__(self, parent=None):
