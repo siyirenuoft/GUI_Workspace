@@ -105,6 +105,7 @@ class DesignSaver:
 
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
                 self.app_reference.update_actuator_text()
+                self.app_reference.update_pushButton_5_state()
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
 
@@ -221,8 +222,7 @@ class DesignSaver:
             self.mpl_canvas.plot(np.linspace(0, 1, len(self.mpl_canvas.current_signal)), self.mpl_canvas.current_signal)
         else:
             self.mpl_canvas.clear_plot()
-
-
+            
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -308,7 +308,7 @@ class MplCanvas(FigureCanvas):
             else:
                 self.current_signal = new_signal
 
-        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 500)  # Adjust t for correct duration
+        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 2345)  # Adjust t for correct duration
         self.plot(t, self.current_signal)
 
 
@@ -371,9 +371,9 @@ class MplCanvas(FigureCanvas):
 
 
     def generate_custom_envelope_json(self, signal_type, duration, amplitude):
-        num_samples = int(duration * 500)  # Adjust the number of samples to match the duration
+        num_samples = int(duration * 2345)  # Adjust the number of samples to match the duration
         t = np.linspace(0, duration, num_samples)
-        # t = np.linspace(0, duration, 500)  # Ensure that the time vector spans the entire duration
+        # t = np.linspace(0, duration, 2345)  # Ensure that the time vector spans the entire duration
 
         if signal_type == "Envelope":
             data = (amplitude * np.sin(2 * np.pi * 5 * t)).tolist()
@@ -437,7 +437,7 @@ class MplCanvas(FigureCanvas):
 
 
     def generate_custom_oscillator_json(self, signal_type, frequency, rate):
-        t = np.linspace(0, 1, 500)
+        t = np.linspace(0, 1, 2345)
         if signal_type == "Sine":
             data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
         elif signal_type == "Square":
@@ -1110,27 +1110,16 @@ class ActuatorCanvas(QGraphicsView):
             actuator_type = event.mimeData().text()
             pos = self.mapToScene(event.position().toPoint())
             
+            # Check if the drop position is within the allowed "white area"
             if self.is_drop_allowed(pos):
-                selected_items = self.scene.selectedItems()
-                if selected_items:
-                    # If there's a selected actuator, add the new one to its branch
-                    selected_actuator = next((item for item in selected_items if isinstance(item, Actuator)), None)
-                    if selected_actuator:
-                        self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type, branch=selected_actuator.id.split('.')[0])
-                    else:
-                        self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
-                else:
-                    # If nothing is selected, proceed as before
-                    self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
+                self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
                 event.acceptProposedAction()
             else:
                 event.ignore()
 
-    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None, branch=None):
-        # If a branch is specified, use it; otherwise, generate a new ID
-        if branch:
-            new_id = self.generate_next_id_in_branch(branch)
-        elif new_id is None:
+    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
+        # Generate a new ID if not provided
+        if new_id is None:
             new_id = self.generate_next_id()
         
         # Determine the branch (e.g., A for A.1)
@@ -1144,7 +1133,7 @@ class ActuatorCanvas(QGraphicsView):
 
         color = self.branch_colors[branch]
 
-        # Automatically determine predecessor and successor if not provided
+        # Automatically determine predecessor if not provided
         if predecessor is None or successor is None:
             predecessor, successor = self.get_predecessor_successor(new_id)
 
@@ -1161,23 +1150,27 @@ class ActuatorCanvas(QGraphicsView):
                 pred_actuator.successor = new_id  # Update the predecessor's successor to the new actuator
                 pred_actuator.update()
 
-        # Update successor's predecessor to the newly added actuator
+                # Draw a line from the predecessor to the newly added actuator
+                line = QLineF(pred_actuator.pos(), actuator.pos())
+                line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                line_item.setZValue(-1)  # Ensure the line is behind the actuators
+                self.draw_arrowhead(line)  # Draw the arrowhead
+
+        # Draw an arrow connecting to the successor (if applicable)
         if successor:
-            succ_actuator = self.get_actuator_by_id(successor)
-            if succ_actuator:
-                succ_actuator.predecessor = new_id  # Update the successor's predecessor to the new actuator
-                succ_actuator.update()
+            for act in self.actuators:
+                if act.id == successor:
+                    line = QLineF(actuator.pos(), act.pos())
+                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
+                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
+                    self.draw_arrowhead(line)
+                    break
 
         actuator.update()  # Update the new actuator to reflect changes
-
-        # Redraw all lines to ensure proper connections
-        self.redraw_all_lines()
 
         # Emit signal indicating the actuator has been added
         self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
 
-        # Update play button state
-        self.haptics_app.update_pushButton_5_state()
 
     def get_actuator_by_id(self, actuator_id):
         """Retrieve an actuator by its ID."""
@@ -1343,29 +1336,20 @@ class ActuatorCanvas(QGraphicsView):
         max_number = max(int(act.id.split('.')[1]) for act in self.actuators if '.' in act.id and act.id.startswith(max_branch))
         
         return f"{max_branch}.{max_number + 1}"
-    
-    def generate_next_id_in_branch(self, branch):
-        # Find the highest number in the specified branch
-        max_number = max([int(act.id.split('.')[1]) for act in self.actuators 
-                        if act.id.startswith(branch + '.')] or [0])
-        return f"{branch}.{max_number + 1}"
 
     def get_predecessor_successor(self, new_id):
         branch, number = new_id.split('.')
         number = int(number)
         
         predecessor = None
-        successor = None
-        for act in self.actuators:
-            if '.' in act.id and act.id.startswith(branch + '.'):
+        for act in reversed(self.actuators):
+            if '.' in act.id:
                 act_branch, act_number = act.id.split('.')
-                act_number = int(act_number)
-                if act_number == number - 1:
+                if act_branch == branch and int(act_number) == number - 1:
                     predecessor = act.id
-                elif act_number == number + 1:
-                    successor = act.id
+                    break
         
-        return predecessor, successor
+        return predecessor, None
 
     def show_context_menu(self, actuator, pos):
         menu = QMenu()
@@ -1918,7 +1902,7 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -1927,13 +1911,13 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
                     adjusted_signals.append(signal)
 
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
                 adjusted_signals.append(signal)
 
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
@@ -1968,7 +1952,7 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -1977,25 +1961,25 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 500)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
                     adjusted_signals.append(signal)
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 500):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
                 adjusted_signals.append(signal)
             elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
                 # Case: The new signal completely overlaps this signal
                 signal_part1 = {
                     "type": signal["type"],
-                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 500)],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
                     "start_time": signal["start_time"],
                     "stop_time": new_start_time,
                     "parameters": signal["parameters"]
                 }
                 signal_part2 = {
                     "type": signal["type"],
-                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 500):],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 2345):],
                     "start_time": new_stop_time,
                     "stop_time": signal["stop_time"],
                     "parameters": signal["parameters"]
@@ -2115,7 +2099,7 @@ class TimelineCanvas(FigureCanvas):
         if not self.signals:
             # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
             default_duration = 10  # seconds
-            t = np.linspace(0, default_duration, 500 * default_duration)
+            t = np.linspace(0, default_duration, 2345 * default_duration)
             signal_data = np.zeros_like(t)
             self.plot_signal_data(t, signal_data)
             return
@@ -2128,13 +2112,13 @@ class TimelineCanvas(FigureCanvas):
         self.signal_duration = max_stop_time
 
         # Initialize an empty array of zeros for the full duration
-        total_samples = int(max_stop_time * 500)
+        total_samples = int(max_stop_time * 2345)
         combined_signal = np.zeros(total_samples)
 
         # Fill in the combined signal with each recorded signal's data
         for signal in self.signals:
-            start_sample = int(signal["start_time"] * 500)
-            stop_sample = int(signal["stop_time"] * 500)
+            start_sample = int(signal["start_time"] * 2345)
+            stop_sample = int(signal["stop_time"] * 2345)
             signal_duration = stop_sample - start_sample
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
             if len(signal["data"]) > 0:
@@ -2194,48 +2178,48 @@ class TimelineCanvas(FigureCanvas):
         # Generate the signal data based on the type and modified parameters
         
         if signal_type == "Sine":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
         elif signal_type == "Square":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
         elif signal_type == "Saw":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
         elif signal_type == "Triangle":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
         elif signal_type == "Chirp":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
         elif signal_type == "FM":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
         elif signal_type == "PWM":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
         elif signal_type == "Noise":
-            t = np.linspace(0, 1, 500)
+            t = np.linspace(0, 1, 2345)
             return np.random.normal(0, 1, len(t)).tolist()
         elif signal_type == "Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
         elif signal_type == "Keyed Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
         elif signal_type == "ASR":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
                                 [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
         elif signal_type == "ADSR":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
                                 [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
@@ -2245,17 +2229,17 @@ class TimelineCanvas(FigureCanvas):
                                 0.25 * parameters["amplitude"]]).tolist()
         elif signal_type == "Exponential Decay":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
         elif signal_type == "PolyBezier":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
         elif signal_type == "Signal Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 500)
+            num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
         return np.zeros_like(t).tolist()
@@ -2329,7 +2313,22 @@ class FloatingVerticalSlider(QSlider):
         super().__init__(Qt.Orientation.Vertical, parent)
         self.app_reference = app_reference  # Store the reference to the main app
         self.setFixedWidth(10)
-        self.setStyleSheet("background-color: gray;")
+        # Apply the custom stylesheet to hide the handle
+        self.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: gray;
+                width: 10px;
+            }
+            QSlider::handle:vertical {
+                background: transparent;
+                border: none;
+                width: 0px;
+                height: 0px;
+            }
+            QSlider::sub-page:vertical {
+                background: transparent;
+            }
+        """)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
         self.slider_start_pos = None
         self.slider_movable = True  # Add a flag to control movement
@@ -2339,6 +2338,9 @@ class FloatingVerticalSlider(QSlider):
         self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
 
         self.global_total_time = None
+
+        # Store the initial vertical position to lock it
+        self.initial_y = self.y()
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -2564,7 +2566,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Variables to control the movement
         #self.slider_moving = False
-        self.slider_step = 1  # Adjust this value to control the speed of movement
+        self.slider_step = 2  # Adjust this value to control the speed of movement
         self.slider_target_pos = 0
 
         self.setup_slider_layer()
@@ -2617,8 +2619,14 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Start moving the slider from its current position to the target position."""
         # Do not reset the position; just start moving from the current position
         current_position = self.floating_slider.x()
-
+    
         # Ensure the slider starts moving towards the target position
+        if current_position == self.slider_target_pos:
+            dpi = self.logicalDpiX()  # Get the screen DPI
+            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            initial_position = int(cm_to_pixels)  # 3 cm in pixels
+            self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
+
         self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
         self.slider_moving = True
         self.slider_timer.start(10)
@@ -2646,7 +2654,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Adjust the width by subtracting 3 cm
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
-            new_pos = new_pos - cm_to_pixels
+            adjusted_new_pos = new_pos - cm_to_pixels
 
 
             # Convert slider position to time and update the actuator highlights
@@ -2661,7 +2669,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 print("Warning: Total time is not set or invalid.")
 
             if self.global_total_time is not None and self.global_total_time > 0:
-                time_position = (new_pos / adjusted_width) * self.global_total_time
+                time_position = (adjusted_new_pos / adjusted_width) * self.global_total_time
                 self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
                 print("Warning: Total time is not set or invalid.~")
@@ -2675,9 +2683,10 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Stop the timer and set the slider_moving to False
                 self.slider_timer.stop()
                 self.slider_moving = False
-
                 # Change the button icon to the run icon
+          
                 self.pushButton_5.setIcon(self.run_icon)
+
 
 
 
@@ -3252,7 +3261,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             "data": []
         }
 
-        t = np.linspace(0, 1, 500).tolist()  # Convert numpy array to list
+        t = np.linspace(0, 1, 2345).tolist()  # Convert numpy array to list
         if signal_type == "Sine":
             base_signal["data"] = np.sin(2 * np.pi * 10 * np.array(t)).tolist()
         elif signal_type == "Square":
@@ -3270,7 +3279,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         elif signal_type == "Noise":
             base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
         elif signal_type == "Envelope":
-            base_signal["data"] = (np.linspace(0, 1, 500) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
+            base_signal["data"] = (np.linspace(0, 1, 2345) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
         elif signal_type == "Keyed Envelope":
             base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
         elif signal_type == "ASR":
