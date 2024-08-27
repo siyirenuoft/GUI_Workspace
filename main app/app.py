@@ -105,7 +105,6 @@ class DesignSaver:
 
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
                 self.app_reference.update_actuator_text()
-                self.app_reference.update_pushButton_5_state()
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
 
@@ -222,7 +221,8 @@ class DesignSaver:
             self.mpl_canvas.plot(np.linspace(0, 1, len(self.mpl_canvas.current_signal)), self.mpl_canvas.current_signal)
         else:
             self.mpl_canvas.clear_plot()
-            
+
+
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -1110,16 +1110,27 @@ class ActuatorCanvas(QGraphicsView):
             actuator_type = event.mimeData().text()
             pos = self.mapToScene(event.position().toPoint())
             
-            # Check if the drop position is within the allowed "white area"
             if self.is_drop_allowed(pos):
-                self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
+                selected_items = self.scene.selectedItems()
+                if selected_items:
+                    # If there's a selected actuator, add the new one to its branch
+                    selected_actuator = next((item for item in selected_items if isinstance(item, Actuator)), None)
+                    if selected_actuator:
+                        self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type, branch=selected_actuator.id.split('.')[0])
+                    else:
+                        self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
+                else:
+                    # If nothing is selected, proceed as before
+                    self.add_actuator(pos.x(), pos.y(), actuator_type=actuator_type)
                 event.acceptProposedAction()
             else:
                 event.ignore()
 
-    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None):
-        # Generate a new ID if not provided
-        if new_id is None:
+    def add_actuator(self, x, y, new_id=None, actuator_type="LRA", predecessor=None, successor=None, branch=None):
+        # If a branch is specified, use it; otherwise, generate a new ID
+        if branch:
+            new_id = self.generate_next_id_in_branch(branch)
+        elif new_id is None:
             new_id = self.generate_next_id()
         
         # Determine the branch (e.g., A for A.1)
@@ -1133,7 +1144,7 @@ class ActuatorCanvas(QGraphicsView):
 
         color = self.branch_colors[branch]
 
-        # Automatically determine predecessor if not provided
+        # Automatically determine predecessor and successor if not provided
         if predecessor is None or successor is None:
             predecessor, successor = self.get_predecessor_successor(new_id)
 
@@ -1150,27 +1161,23 @@ class ActuatorCanvas(QGraphicsView):
                 pred_actuator.successor = new_id  # Update the predecessor's successor to the new actuator
                 pred_actuator.update()
 
-                # Draw a line from the predecessor to the newly added actuator
-                line = QLineF(pred_actuator.pos(), actuator.pos())
-                line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
-                line_item.setZValue(-1)  # Ensure the line is behind the actuators
-                self.draw_arrowhead(line)  # Draw the arrowhead
-
-        # Draw an arrow connecting to the successor (if applicable)
+        # Update successor's predecessor to the newly added actuator
         if successor:
-            for act in self.actuators:
-                if act.id == successor:
-                    line = QLineF(actuator.pos(), act.pos())
-                    line_item = self.scene.addLine(line, QPen(Qt.GlobalColor.black, 2))
-                    line_item.setZValue(-1)  # Ensure the line is behind the actuators
-                    self.draw_arrowhead(line)
-                    break
+            succ_actuator = self.get_actuator_by_id(successor)
+            if succ_actuator:
+                succ_actuator.predecessor = new_id  # Update the successor's predecessor to the new actuator
+                succ_actuator.update()
 
         actuator.update()  # Update the new actuator to reflect changes
+
+        # Redraw all lines to ensure proper connections
+        self.redraw_all_lines()
 
         # Emit signal indicating the actuator has been added
         self.actuator_added.emit(new_id, actuator_type, color.name(), x, y)
 
+        # Update play button state
+        self.haptics_app.update_pushButton_5_state()
 
     def get_actuator_by_id(self, actuator_id):
         """Retrieve an actuator by its ID."""
@@ -1336,20 +1343,29 @@ class ActuatorCanvas(QGraphicsView):
         max_number = max(int(act.id.split('.')[1]) for act in self.actuators if '.' in act.id and act.id.startswith(max_branch))
         
         return f"{max_branch}.{max_number + 1}"
+    
+    def generate_next_id_in_branch(self, branch):
+        # Find the highest number in the specified branch
+        max_number = max([int(act.id.split('.')[1]) for act in self.actuators 
+                        if act.id.startswith(branch + '.')] or [0])
+        return f"{branch}.{max_number + 1}"
 
     def get_predecessor_successor(self, new_id):
         branch, number = new_id.split('.')
         number = int(number)
         
         predecessor = None
-        for act in reversed(self.actuators):
-            if '.' in act.id:
+        successor = None
+        for act in self.actuators:
+            if '.' in act.id and act.id.startswith(branch + '.'):
                 act_branch, act_number = act.id.split('.')
-                if act_branch == branch and int(act_number) == number - 1:
+                act_number = int(act_number)
+                if act_number == number - 1:
                     predecessor = act.id
-                    break
+                elif act_number == number + 1:
+                    successor = act.id
         
-        return predecessor, None
+        return predecessor, successor
 
     def show_context_menu(self, actuator, pos):
         menu = QMenu()
@@ -2313,22 +2329,7 @@ class FloatingVerticalSlider(QSlider):
         super().__init__(Qt.Orientation.Vertical, parent)
         self.app_reference = app_reference  # Store the reference to the main app
         self.setFixedWidth(10)
-        # Apply the custom stylesheet to hide the handle
-        self.setStyleSheet("""
-            QSlider::groove:vertical {
-                background: gray;
-                width: 10px;
-            }
-            QSlider::handle:vertical {
-                background: transparent;
-                border: none;
-                width: 0px;
-                height: 0px;
-            }
-            QSlider::sub-page:vertical {
-                background: transparent;
-            }
-        """)
+        self.setStyleSheet("background-color: gray;")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
         self.slider_start_pos = None
         self.slider_movable = True  # Add a flag to control movement
@@ -2338,9 +2339,6 @@ class FloatingVerticalSlider(QSlider):
         self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
 
         self.global_total_time = None
-
-        # Store the initial vertical position to lock it
-        self.initial_y = self.y()
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -2566,7 +2564,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Variables to control the movement
         #self.slider_moving = False
-        self.slider_step = 2  # Adjust this value to control the speed of movement
+        self.slider_step = 1  # Adjust this value to control the speed of movement
         self.slider_target_pos = 0
 
         self.setup_slider_layer()
@@ -2619,14 +2617,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Start moving the slider from its current position to the target position."""
         # Do not reset the position; just start moving from the current position
         current_position = self.floating_slider.x()
-    
-        # Ensure the slider starts moving towards the target position
-        if current_position == self.slider_target_pos:
-            dpi = self.logicalDpiX()  # Get the screen DPI
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-            initial_position = int(cm_to_pixels)  # 3 cm in pixels
-            self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
 
+        # Ensure the slider starts moving towards the target position
         self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
         self.slider_moving = True
         self.slider_timer.start(10)
@@ -2654,7 +2646,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Adjust the width by subtracting 3 cm
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
-            adjusted_new_pos = new_pos - cm_to_pixels
+            new_pos = new_pos - cm_to_pixels
 
 
             # Convert slider position to time and update the actuator highlights
@@ -2669,7 +2661,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 print("Warning: Total time is not set or invalid.")
 
             if self.global_total_time is not None and self.global_total_time > 0:
-                time_position = (adjusted_new_pos / adjusted_width) * self.global_total_time
+                time_position = (new_pos / adjusted_width) * self.global_total_time
                 self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
                 print("Warning: Total time is not set or invalid.~")
@@ -2683,10 +2675,9 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Stop the timer and set the slider_moving to False
                 self.slider_timer.stop()
                 self.slider_moving = False
-                # Change the button icon to the run icon
-          
-                self.pushButton_5.setIcon(self.run_icon)
 
+                # Change the button icon to the run icon
+                self.pushButton_5.setIcon(self.run_icon)
 
 
 
