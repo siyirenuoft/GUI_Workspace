@@ -105,6 +105,7 @@ class DesignSaver:
 
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
                 self.app_reference.update_actuator_text()
+                self.app_reference.update_pushButton_5_state()
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
 
@@ -221,8 +222,7 @@ class DesignSaver:
             self.mpl_canvas.plot(np.linspace(0, 1, len(self.mpl_canvas.current_signal)), self.mpl_canvas.current_signal)
         else:
             self.mpl_canvas.clear_plot()
-
-
+            
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
@@ -2313,7 +2313,22 @@ class FloatingVerticalSlider(QSlider):
         super().__init__(Qt.Orientation.Vertical, parent)
         self.app_reference = app_reference  # Store the reference to the main app
         self.setFixedWidth(10)
-        self.setStyleSheet("background-color: gray;")
+        # Apply the custom stylesheet to hide the handle
+        self.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: gray;
+                width: 10px;
+            }
+            QSlider::handle:vertical {
+                background: transparent;
+                border: none;
+                width: 0px;
+                height: 0px;
+            }
+            QSlider::sub-page:vertical {
+                background: transparent;
+            }
+        """)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Set focus to ensure it responds to clicks
         self.slider_start_pos = None
         self.slider_movable = True  # Add a flag to control movement
@@ -2323,6 +2338,9 @@ class FloatingVerticalSlider(QSlider):
         self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
 
         self.global_total_time = None
+
+        # Store the initial vertical position to lock it
+        self.initial_y = self.y()
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -2548,7 +2566,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Variables to control the movement
         #self.slider_moving = False
-        self.slider_step = 1  # Adjust this value to control the speed of movement
+        self.slider_step = 2  # Adjust this value to control the speed of movement
         self.slider_target_pos = 0
 
         self.setup_slider_layer()
@@ -2601,8 +2619,14 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Start moving the slider from its current position to the target position."""
         # Do not reset the position; just start moving from the current position
         current_position = self.floating_slider.x()
-
+    
         # Ensure the slider starts moving towards the target position
+        if current_position == self.slider_target_pos:
+            dpi = self.logicalDpiX()  # Get the screen DPI
+            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            initial_position = int(cm_to_pixels)  # 3 cm in pixels
+            self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
+
         self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
         self.slider_moving = True
         self.slider_timer.start(10)
@@ -2630,7 +2654,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Adjust the width by subtracting 3 cm
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
-            new_pos = new_pos - cm_to_pixels
+            adjusted_new_pos = new_pos - cm_to_pixels
 
 
             # Convert slider position to time and update the actuator highlights
@@ -2645,7 +2669,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 print("Warning: Total time is not set or invalid.")
 
             if self.global_total_time is not None and self.global_total_time > 0:
-                time_position = (new_pos / adjusted_width) * self.global_total_time
+                time_position = (adjusted_new_pos / adjusted_width) * self.global_total_time
                 self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
                 print("Warning: Total time is not set or invalid.~")
@@ -2659,9 +2683,10 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Stop the timer and set the slider_moving to False
                 self.slider_timer.stop()
                 self.slider_moving = False
-
                 # Change the button icon to the run icon
+          
                 self.pushButton_5.setIcon(self.run_icon)
+
 
 
 
