@@ -19,6 +19,8 @@ matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 import json
 import pickle
+from scipy import signal
+
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
 from PyQt6.QtCore import Qt, pyqtSlot, QPoint
@@ -291,6 +293,9 @@ class MplCanvas(FigureCanvas):
 
     def add_signal(self, signal_data, combine):
         new_signal = np.array(signal_data["data"])
+        print(self.current_signal)
+
+ 
         
         if self.current_signal is None:
             self.current_signal = new_signal
@@ -304,11 +309,13 @@ class MplCanvas(FigureCanvas):
                 self.current_signal = np.tile(self.current_signal, repeat_factor)[:len(new_signal)]
             
             if combine:
-                self.current_signal = self.current_signal + new_signal
+                self.current_signal = self.current_signal * new_signal
             else:
                 self.current_signal = new_signal
 
         t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 2345)  # Adjust t for correct duration
+        
+        print("current_signal",self.current_signal)
         self.plot(t, self.current_signal)
 
 
@@ -354,7 +361,7 @@ class MplCanvas(FigureCanvas):
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
             # Handle envelopes
-            elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
+            elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier"]:
                 dialog = EnvelopeDialog(signal_type, self)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
@@ -362,12 +369,12 @@ class MplCanvas(FigureCanvas):
                     customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-        # If a customized signal was created or retrieved, add it to the plot
-        if customized_signal:
-            self.add_signal(customized_signal, combine=True)
+            # If a customized signal was created or retrieved, add it to the plot
+            if customized_signal:
+                self.add_signal(customized_signal, combine=True)
         
         self.app_reference.first_signal_drop += 1
-        print("drop",self.app_reference.first_signal_drop)
+        # print("drop",self.app_reference.first_signal_drop)
 
 
     def generate_custom_envelope_json(self, signal_type, duration, amplitude):
@@ -376,7 +383,7 @@ class MplCanvas(FigureCanvas):
         # t = np.linspace(0, duration, 2345)  # Ensure that the time vector spans the entire duration
 
         if signal_type == "Envelope":
-            data = (amplitude * np.sin(2 * np.pi * 5 * t)).tolist()
+            data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(3 * t)).tolist()
         elif signal_type == "Keyed Envelope":
             data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
         elif signal_type == "ASR":
@@ -393,8 +400,6 @@ class MplCanvas(FigureCanvas):
             data = (amplitude * np.exp(-5 * t / duration)).tolist()  # Scale the decay based on duration
         elif signal_type == "PolyBezier":
             data = (amplitude * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
-        elif signal_type == "Signal Envelope":
-            data = (amplitude * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
         else:
             data = np.zeros_like(t).tolist()
 
@@ -558,13 +563,13 @@ class OscillatorDialog(QDialog):
         
         form_layout = QFormLayout()
         self.frequency_input = QDoubleSpinBox()
-        self.frequency_input.setRange(0, 1000)  # Adjust range as needed
+        self.frequency_input.setRange(0, 400)  # Adjust range as needed
         self.frequency_input.setValue(10)  # Default value
         form_layout.addRow("Frequency (Hz):", self.frequency_input)
         
         self.rate_input = QDoubleSpinBox()
         self.rate_input.setRange(0, 1000)  # Adjust range as needed
-        self.rate_input.setValue(1)  # Default value
+        self.rate_input.setValue(0)  # Default value
         form_layout.addRow("Rate:", self.rate_input)
         
         layout.addLayout(form_layout)
@@ -599,7 +604,7 @@ class EnvelopeDialog(QDialog):
 
         # Configure the amplitude input
         self.amplitude_input = QDoubleSpinBox()
-        self.amplitude_input.setRange(-1000, 1000)  # Allow amplitude to be any value between -10 and 10
+        self.amplitude_input.setRange(0, 1)  # Allow amplitude to be any value between -10 and 10
         self.amplitude_input.setValue(1)  # Default value
         self.amplitude_input.setDecimals(2)  # Allow up to two decimal places
         self.amplitude_input.setSingleStep(0.1)  # Increment in 0.1 steps
@@ -2205,7 +2210,7 @@ class TimelineCanvas(FigureCanvas):
             duration = parameters["duration"]
             num_samples = int(duration * 2345)
             t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
+            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(3 * t)).tolist()
         elif signal_type == "Keyed Envelope":
             duration = parameters["duration"]
             num_samples = int(duration * 2345)
@@ -2830,7 +2835,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.raise_slider_layer()
                 
    
-
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
         if actuator:
@@ -3048,7 +3052,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                     # Assuming the waveform data is under 'value0' and is a list of y-values
                     waveform = self.extract_waveform(data)
                     if waveform is not None:
-                        data["data"] = waveform.tolist()
+                        data["data"] = waveform
                         self.add_imported_waveform(file_path, data)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to import waveform: {e}")
@@ -3074,39 +3078,87 @@ class Haptics_App(QtWidgets.QMainWindow):
         child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
         child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
 
-    # No normalization (the one to use ****)
-    # def extract_waveform(self, data):
-    #     try:
-    #         # Extract gain and use it to generate a sine waveform
-    #         gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
-    #         # Generate a simple sine wave using the gain value
-    #         t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
-    #         waveform = gain * np.sin(2 * np.pi * t)
-    #         print(f"Waveform length: {len(waveform)}")  # Debugging print statement
-    #         return waveform
-    #     except KeyError as e:
-    #         print(f"KeyError: {e}")
-    #         return None
-        
+    def generate_imported_waveform(self, data, sampling_rate=2345):
+        current_level = data.get('value0', {})
+        gain = current_level.get('gain', 1.0)
+        print("gain",gain)
+        bias = current_level.get('bias', 0.0)
+        print("bias",bias)
+        waveform_type = current_level.get('m_ptr', {}).get('polymorphic_name', '')
+        print("waveform_type",waveform_type)
+        t = np.linspace(0, 1, sampling_rate)
+        oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
+        x_component = oscillator.get('x', {})
+        frequency = x_component.get('gain', 1.0) /(2*np.pi)
+        print("frequency",frequency)
+        x_bias = x_component.get('bias', 0.0)
+   
+
+        if waveform_type == "tact::Signal::Model<tact::Sine>":
+            waveform = (gain * np.sin(2*np.pi*frequency * t + x_bias) + bias).tolist()
+
+        elif waveform_type == "tact::Signal::Model<tact::Square>":
+       
+            waveform = (gain * np.sign(np.sin(2 * np.pi * frequency * t + x_bias)) + bias).tolist()
+
+        elif waveform_type == "tact::Signal::Model<tact::Triangle>":
+            waveform = (gain * (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1) + bias).tolist()  # 0.5 gives a triangle wave
+
+        elif waveform_type == "tact::Signal::Model<tact::Saw>":
+            waveform = (gain * (2 * (t * frequency - np.floor(t * frequency + 0.5))) + bias).tolist()
+
+        # elif waveform_type == "tact::Signal::Model<tact::Chirp>":
+        #     # Extract frequency modulation parameters
+        #     lhs = x_component.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOperator', {}).get('lhs', {})
+        #     f0 = lhs.get('gain', 314.1592653589793) / (2 * np.pi)  # Start frequency in Hz
+        #     chirp_rate = lhs.get('bias', 628.3185307179587) / (2 * np.pi)  # Chirp rate in Hz/s
+        #     print("lhs",lhs)
+        #     print("f0",f0)
+        #     print("chirp_rate",chirp_rate)
+        #     # Calculate the end frequency based on chirp rate
+        #     f1 = f0 + chirp_rate * t[-1]
+            
+        #     # Generate the chirp waveform
+        #     waveform = (gain * signal.chirp(t, f0=f0, f1=f1, t1=t[-1], method='linear') + bias).tolist()
+  
+
+        # elif waveform_type == "tact::Signal::Model<tact::FM>":
+        #     oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
+        #     x_component = oscillator.get('x', {})
+        #     carrier_freq = x_component.get('gain', 1.0)
+        #     mod_index = x_component.get('bias', 0.5)  # Modulation index
+        #     mod_signal = np.sin(2 * np.pi * t)  # Example modulating signal
+        #     waveform = gain * np.sin(2 * np.pi * carrier_freq * t + mod_index * mod_signal) + bias
+
+        # elif waveform_type == "tact::Signal::Model<tact::PWM>":
+        #     oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
+        #     x_component = oscillator.get('x', {})
+        #     frequency = x_component.get('gain', 1.0)
+        #     duty_cycle = x_component.get('bias', 0.5) * 100  # Duty cycle as percentage
+        #     waveform = gain * signal.square(frequency * t, duty=duty_cycle) + bias
+
+        elif waveform_type == "tact::Signal::Model<tact::Noise>":
+            waveform = (gain * np.random.normal(0, 1, len(t)) + bias).tolist()
+
+        else:
+            print(f"Unknown waveform type: {waveform_type}")
+            return None
+
+        return waveform
+            
     def extract_waveform(self, data):
         try:
-            # Extract gain and use it to generate a sine waveform
-            gain = data["value0"]["m_ptr"]["ptr_wrapper"]["data"]["m_model"]["IOscillator"]["x"]["gain"]
+            waveform = self.generate_imported_waveform(data = data)
+
+            # print(waveform)
+            print("len_w",len(waveform))
             
-            # Generate a simple sine wave using the gain value
-            t = np.linspace(0, 1, 500)  # Adjust the number of points as needed
-            waveform = gain * np.sin(2 * np.pi * t)
-            
-            # Normalize the waveform from -500 to 500 range to -1 to 1
-            max_val = 500
-            min_val = -500
-            normalized_waveform = 2 * (waveform - min_val) / (max_val - min_val) - 1
-            
-            print(f"Normalized Waveform length: {len(normalized_waveform)}")  # Debugging print statement
-            return normalized_waveform
+            return waveform
+
         except KeyError as e:
             print(f"KeyError: {e}")
             return None
+
 
 
     def create_actuator_branch(self):
@@ -3174,7 +3226,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.signal_templates[item] = self.generate_signal(item)
 
         # Add child items to "Envelopes"
-        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]
+        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier"]
         for item in env_items:
             child = QTreeWidgetItem(envelopes)
             child.setText(0, item)
@@ -3290,8 +3342,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             base_signal["data"] = (np.exp(-5 * np.array(t))).tolist()
         elif signal_type == "PolyBezier":
             base_signal["data"] = (np.array(t)**3 - 3 * np.array(t)**2 + 3 * np.array(t)).tolist()
-        elif signal_type == "Signal Envelope":
-            base_signal["data"] = (np.abs(np.sin(2 * np.pi * 3 * np.array(t)))).tolist()
         elif signal_type in self.custom_signals:  # Check if it's a custom signal
             base_signal["data"] = self.custom_signals.get(signal_type, {"data": np.zeros_like(t).tolist()})["data"]
         else:

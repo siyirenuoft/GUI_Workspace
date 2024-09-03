@@ -442,6 +442,7 @@ class MplCanvas(FigureCanvas):
             data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
         elif signal_type == "Square":
             data = np.sign(np.sin(2 * np.pi * frequency * t)).tolist()
+            print(data)
         elif signal_type == "Saw":
             data = (2 * (t * frequency - np.floor(t * frequency + 0.5))).tolist()
         elif signal_type == "Triangle":
