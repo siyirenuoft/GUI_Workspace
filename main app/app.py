@@ -30,9 +30,54 @@ import math
 import time
 from collections import deque
 
+
+# For verifying the function of sending commands
+import threading
+import matplotlib.pyplot as plt
+
+
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
+
+class VerificationPlotter:
+    def __init__(self, target_address=0):
+        self.target_address = target_address
+        self.command_queue = deque(maxlen=1000)  # Store the last 1000 commands
+        self.plotting_thread = threading.Thread(target=self.plot_duty, daemon=True)
+        self.plotting_thread.start()
+
+    def receive_command(self, addr, duty, freq, start_stop):
+        if addr == self.target_address:
+            self.command_queue.append((time.time(), duty))
+
+    def plot_duty(self):
+        plt.ion()
+        fig, ax = plt.subplots()
+        times = deque(maxlen=1000)
+        duties = deque(maxlen=1000)
+
+        while True:
+            if self.command_queue:
+                current_time, duty = self.command_queue.popleft()
+                times.append(current_time)
+                duties.append(duty)
+
+                ax.clear()
+                ax.plot(times, duties, label=f'Address {self.target_address}')
+                ax.set_xlabel('Time (s)')
+                ax.set_ylabel('Duty')
+                ax.set_title(f'Duty over Time for Address {self.target_address}')
+                ax.legend()
+                plt.draw()
+                plt.pause(0.01)  # Pause to allow real-time updates
+
+    def start(self):
+        plt.show(block=True)
+
+if __name__ == "__main__":
+    plotter = VerificationPlotter(target_address=0)
+    plotter.start()
 
 class HapticCommandManager:
     def __init__(self, ble_api):
@@ -45,6 +90,23 @@ class HapticCommandManager:
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
         self.last_sent_addr = None
+        self.active_actuators = set()
+
+        self.last_sent_commands = [] # for the end of the slider use
+
+    def detect_leaving_edges(self, current_amplitudes):
+        current_actuators = set(current_amplitudes.keys())
+        leaving_edges = self.active_actuators - current_actuators
+        stop_commands = [
+            (self.actuator_id_to_addr(actuator_id), 0, 0, 0)
+            for actuator_id in leaving_edges
+        ]
+        self.active_actuators = current_actuators
+        return stop_commands
+
+    def actuator_id_to_addr(self, actuator_id):
+        chain, index = actuator_id.split('.')
+        return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
 
     def map_amplitude_to_duty(self, amplitude):
         return int(round((amplitude + 1) * 7.5))
@@ -57,32 +119,32 @@ class HapticCommandManager:
             return max(0, min(mapped, 7))
 
     def prepare_command(self, actuator_id, amplitude, frequency):
-        chain, index = actuator_id.split('.')
-        addr = (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
-
+        addr = self.actuator_id_to_addr(actuator_id)
         if frequency <= 100:
             duty = self.map_amplitude_to_duty(amplitude)
             freq = 0
         else:
             duty = 8
             freq = self.map_frequency_to_freq_param(frequency)
-        
         return (addr, duty, freq, 1)  # 1 for start
 
     def process_commands(self):
         current_time = time.time()
         if current_time - self.last_send_time >= self.CMD_SENDING_INTERVAL:
             if self.command_queue and self.is_playing:
-                # Send all commands in the queue within the allowed time frame
+                self.last_sent_commands = list(self.command_queue)  # Store a copy of the current commands
                 while self.command_queue:
                     addr, duty, freq, start_stop = self.command_queue.popleft()
                     self.ble_api.send_command(addr, duty, freq, start_stop)
                     print(f"Sending command: Addr {addr}, Duty {duty}, Freq {freq}, Start/Stop {start_stop}")
-                self.last_send_time = current_time
-                self.last_sent_addr = addr
+                    self.last_send_time = current_time
+                    self.last_sent_addr = addr
+                # Optional: clear the command queue after processing
+                self.command_queue.clear()
 
     def start_playback(self):
         self.is_playing = True
+        self.command_queue.clear()
 
     def stop_playback(self):
         self.is_playing = False
@@ -94,26 +156,50 @@ class HapticCommandManager:
         self.command_queue.clear()
         for cmd in stop_commands:
             self.ble_api.send_command(*cmd)
-            print(f"Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
+            print(f"[Play Button Stopping] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
             time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
 
     def update(self, current_amplitudes):
         if not self.is_playing:
             return
 
-        # Prepare all commands
-        commands = [
+        # Detect leaving edges and generate stop commands
+        stop_commands = self.detect_leaving_edges(current_amplitudes)
+
+        # Prepare all commands for active actuators
+        active_commands = [
             self.prepare_command(actuator_id, data['amplitude'], data.get('frequency', 100))
             for actuator_id, data in current_amplitudes.items()
         ]
 
+        # Combine stop commands and active commands
+        all_commands = stop_commands + active_commands
+
         # Sort commands to prioritize addresses that haven't been sent recently
-        commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
+        all_commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
 
         # Add all commands to the queue
-        self.command_queue.extend(commands)
+        self.command_queue.extend(all_commands)
 
         self.process_commands()
+
+    def end_of_slider(self):
+        self.is_playing = False
+
+        # Similar to stop_playback, but use the last sent commands if the queue is empty
+        stop_commands = [
+            (addr, 0, 0, 0) for addr in set(cmd[0] for cmd in self.command_queue or self.last_sent_commands)
+        ]
+        print("END OF SLIDER")
+        print(self.command_queue)
+        self.command_queue.clear()
+        for cmd in stop_commands:
+            self.ble_api.send_command(*cmd)
+            print(f"[End of Slider] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
+            time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
+
+        # Clear active actuators
+        self.active_actuators.clear()
         
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
@@ -2766,6 +2852,9 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Change the button icon to the run icon
           
                 self.pushButton_5.setIcon(self.run_icon)
+                
+                # To send ending condition if the slider reaches the end.
+                self.haptic_manager.end_of_slider()
         
         self.haptic_manager.update(self.current_amplitudes)
 
