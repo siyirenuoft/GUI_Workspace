@@ -27,9 +27,89 @@ from PyQt6.QtCore import Qt, pyqtSlot, QPoint
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
 from PyQt6.QtCore import pyqtSignal
 
+import time
+from collections import deque
+import math
+import python_ble_api
+
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
+
+class HapticCommandManager:
+    def __init__(self, ble_api):
+        self.ble_api = ble_api
+        self.command_queue = deque()
+        self.last_send_time = 0
+        self.is_playing = False
+        self.CHAIN_JUMP_INDEX = 20
+        self.CMD_SENDING_FREQ = 100  # Hz
+        self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
+
+    def map_amplitude_to_duty(self, amplitude):
+        # Map amplitude from [-1, 1] to [0, 15]
+        return int(round((amplitude + 1) * 7.5))
+
+    def map_frequency_to_freq_param(self, frequency):
+        if frequency <= 100:
+            return 0  # Use the lowest possible freq for <= 100 Hz
+        else:
+            # Map 100Hz to 500Hz to [0, 7]
+            mapped = int(round((frequency - 100) / (500 - 100) * 7))
+            return max(0, min(mapped, 7))  # Ensure it's within [0, 7]
+
+    def add_command(self, actuator_id, amplitude, frequency):
+        chain, index = actuator_id.split('.')
+        addr = (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
+
+        if frequency <= 100:
+            duty = self.map_amplitude_to_duty(amplitude)
+            freq = 0
+        else:
+            duty = 8
+            freq = self.map_frequency_to_freq_param(frequency)
+
+        self.command_queue.append((addr, duty, freq, 1))  # 1 for start
+        
+        # Print the queued command
+        print(f"Command queued: Actuator {actuator_id}, Amplitude: {amplitude:.2f}, Frequency: {frequency:.2f} Hz")
+
+        self.command_queue.append((addr, duty, freq, 1))  # 1 for start
+
+    def process_commands(self):
+        current_time = time.time()
+        if current_time - self.last_send_time >= self.CMD_SENDING_INTERVAL:
+            if self.command_queue and self.is_playing:
+                addr, duty, freq, start_stop = self.command_queue.popleft()
+                self.ble_api.send_command(addr, duty, freq, start_stop)
+                
+                # Print the command details
+                actuator_id = f"{chr(ord('A') + addr // self.CHAIN_JUMP_INDEX)}.{addr % self.CHAIN_JUMP_INDEX + 1}"
+                command_type = "Start" if start_stop == 1 else "Stop"
+                print(f"Command sent: Actuator {actuator_id}, {command_type}, Duty: {duty}, Freq: {freq}")
+                
+                self.last_send_time = current_time
+
+    def start_playback(self):
+        self.is_playing = True
+
+    def stop_playback(self):
+        self.is_playing = False
+        # Send stop commands for all active actuators
+        while self.command_queue:
+            addr, _, _, _ = self.command_queue.popleft()
+            self.ble_api.send_command(addr, 0, 0, 0)  # Stop the actuator
+
+    def update(self, current_amplitudes):
+        if not self.is_playing:
+            return
+
+        for actuator_id, data in current_amplitudes.items():
+            amplitude = data['amplitude']
+            frequency = data.get('frequency', 100)  # Default to 100 Hz if not specified
+            self.add_command(actuator_id, amplitude, frequency)
+
+        self.process_commands()
 
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
