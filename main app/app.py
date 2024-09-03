@@ -2356,7 +2356,7 @@ class FloatingVerticalSlider(QSlider):
 
     def mouseMoveEvent(self, event):
         if not self.slider_movable:
-            event.ignore()  # Ignore movement events to prevent moving the slider
+            event.ignore()
             return
 
         if event.buttons() & Qt.MouseButton.LeftButton and self.slider_start_pos is not None:
@@ -2366,43 +2366,33 @@ class FloatingVerticalSlider(QSlider):
             new_x = int(self.x() + delta_x)
             max_x = self.parent().width() - self.width()
 
-            # Prevent dragging before the 3 cm position
             new_x = max(new_x, int(self.cm_to_pixels))
 
-            # Keep the slider within bounds
             if new_x > max_x:
                 new_x = max_x
 
-            # Move the slider
             self.move(new_x, self.y())
 
-            # Update actuator highlights based on the slider's new position
             self.update_actuator_highlight(new_x)
+            
+            total_time = self.app_reference.calculate_total_time()
+            if total_time > 0:
+                time_position = total_time * (new_x - self.cm_to_pixels) / (self.parent().width() - self.cm_to_pixels)
+                self.app_reference.update_current_amplitudes(time_position)
 
-            super().mouseMoveEvent(event)
-
+        super().mouseMoveEvent(event)
 
     def update_actuator_highlight(self, slider_position):
         adjusted_width = self.parent().width() - self.cm_to_pixels
         new_pos = slider_position - self.cm_to_pixels
         
-        # Ensure the global total time is valid
-        if self.global_total_time is None:
-            # Find the global largest stop time across all actuators
-            all_stop_times = []
-            for signals in self.app_reference.actuator_signals.values():
-                all_stop_times.extend([signal["stop_time"] for signal in signals])
-            
-            if all_stop_times:
-                self.global_total_time = max(all_stop_times)
-            else:
-                print("Warning: Total time is not set or invalid.")
-
-        if self.global_total_time is not None and self.global_total_time > 0:
-            time_position = (new_pos / adjusted_width) * self.global_total_time
+        total_time = self.app_reference.calculate_total_time()
+        if total_time > 0:
+            time_position = (new_pos / adjusted_width) * total_time
             self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
+            self.app_reference.update_current_amplitudes(time_position)
         else:
-            print("Warning: app_reference or global_total_time is missing.")
+            print("Warning: No signals found or invalid total time.")
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -2574,6 +2564,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Call this method initially to set the state of pushButton_5
         self.update_pushButton_5_state()
 
+        self.current_amplitudes = {}
+
     def update_pushButton_5_state(self):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
         # Check if any actuator has signals
@@ -2638,6 +2630,11 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_moving = False
         self.pushButton_5.setIcon(self.run_icon)  # Switch back to Run icon
 
+    def calculate_total_time(self):
+        all_stop_times = []
+        for signals in self.actuator_signals.values():
+            all_stop_times.extend([signal["stop_time"] for signal in signals])
+        return max(all_stop_times) if all_stop_times else 0
 
     def move_slider(self):
         """Move the slider incrementally towards the target position."""
@@ -2656,23 +2653,13 @@ class Haptics_App(QtWidgets.QMainWindow):
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
             adjusted_new_pos = new_pos - cm_to_pixels
 
-
-            # Convert slider position to time and update the actuator highlights
-            # Find the global largest stop time across all actuators
-            all_stop_times = []
-            for signals in self.actuator_signals.values():
-                all_stop_times.extend([signal["stop_time"] for signal in signals])
-
-            if all_stop_times:
-                self.global_total_time = max(all_stop_times)
-            else:
-                print("Warning: Total time is not set or invalid.")
-
-            if self.global_total_time is not None and self.global_total_time > 0:
-                time_position = (adjusted_new_pos / adjusted_width) * self.global_total_time
+            total_time = self.calculate_total_time()
+            if total_time > 0:
+                time_position = (adjusted_new_pos / adjusted_width) * total_time
+                self.update_current_amplitudes(time_position)
                 self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
-                print("Warning: Total time is not set or invalid.~")
+                print("Warning: No signals found or invalid total time.")
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
@@ -2727,6 +2714,31 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.raise_slider_layer()  # Ensure the slider layer stays on top after resizing
         return super(Haptics_App, self).eventFilter(source, event)
 
+
+    def update_current_amplitudes(self, time_position):
+        self.current_amplitudes.clear()
+        for actuator_id, signals in self.actuator_signals.items():
+            for signal in signals:
+                if signal["start_time"] <= time_position <= signal["stop_time"]:
+                    signal_duration = signal["stop_time"] - signal["start_time"]
+                    relative_position = (time_position - signal["start_time"]) / signal_duration
+                    index = int(relative_position * len(signal["data"]))
+                    
+                    # Ensure index is within bounds
+                    index = max(0, min(index, len(signal["data"]) - 1))
+                    
+                    amplitude = signal["data"][index]
+                    
+                    self.current_amplitudes[actuator_id] = amplitude
+                    break  # Assume only one signal per actuator at a given time
+        
+        # Print the current amplitudes
+        print(f"Current Amplitudes at time {time_position:.2f}s:")
+        for actuator_id, amplitude in self.current_amplitudes.items():
+            print(f"  Actuator {actuator_id}: {amplitude:.4f}")
+        print("--------------------")  # Separator for readability
+
+        
     def update_actuator_text(self):
         
         # Find the global largest stop time across all actuators
