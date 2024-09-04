@@ -40,8 +40,8 @@ class HapticCommandManager:
         self.command_queue = deque(maxlen=None)  
         self.last_send_time = 0
         self.is_playing = False
-        self.CHAIN_JUMP_INDEX = 20
-        self.CMD_SENDING_FREQ = 100  # Hz
+        self.CHAIN_JUMP_INDEX = 16
+        self.CMD_SENDING_FREQ = 200  # Hz
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
         self.last_sent_addr = None
