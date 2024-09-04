@@ -16,7 +16,7 @@ from scipy.fft import fft, fftfreq
 
 # Product signal
 # product_signal = signal1 * signal2 * signal3
-wav_filename = 'square5_sine200.wav'
+wav_filename = 'sine5_sine200.wav'
 # read the wav file, print the sampling rate and duration, extract the first second of the signal as product_signal
 import soundfile as sf
 signal, fs = sf.read(wav_filename)
@@ -67,10 +67,12 @@ from scipy.signal import stft
 
 # Perform STFT on the signal
 downsample_rate = 200
-frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=int(sampling_rate/downsample_rate))  # Use a window of 240 samples
+frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=int(sampling_rate/downsample_rate), noverlap=0)  # Use a window of 240 samples
 # for each window, find the highest frequency component and mark it on the spectrogram. Set freq limit to 500 Hz
 max_freq = np.argmax(np.abs(Zxx), axis=0)
 max_freq = frequencies[max_freq]
+print(len(max_freq), len(times), Zxx.shape)
+print(max_freq)
 
 # Plot the spectrogram
 plt.figure(figsize=(10, 4))
@@ -83,7 +85,7 @@ plt.xlabel('Time [sec]')
 plt.colorbar(label='Magnitude')
 plt.show()
 
-# exit()
+exit()
 
 
 # Downsample the signal to 200 samples/sec
