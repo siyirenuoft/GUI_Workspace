@@ -30,6 +30,8 @@ import math
 import time
 from collections import deque
 
+TIME_STAMPS = 2345 # Total time * TIME_STAMPS is the sampling rate
+
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
@@ -435,7 +437,7 @@ class MplCanvas(FigureCanvas):
             else:
                 self.current_signal = new_signal
 
-        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 2345)  # Adjust t for correct duration
+        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / TIME_STAMPS)  # Adjust t for correct duration
         self.plot(t, self.current_signal)
 
 
@@ -498,9 +500,9 @@ class MplCanvas(FigureCanvas):
 
 
     def generate_custom_envelope_json(self, signal_type, duration, amplitude):
-        num_samples = int(duration * 2345)  # Adjust the number of samples to match the duration
+        num_samples = int(duration * TIME_STAMPS)  # Adjust the number of samples to match the duration
         t = np.linspace(0, duration, num_samples)
-        # t = np.linspace(0, duration, 2345)  # Ensure that the time vector spans the entire duration
+        # t = np.linspace(0, duration, TIME_STAMPS)  # Ensure that the time vector spans the entire duration
 
         if signal_type == "Envelope":
             data = (amplitude * np.sin(2 * np.pi * 5 * t)).tolist()
@@ -564,7 +566,7 @@ class MplCanvas(FigureCanvas):
 
 
     def generate_custom_oscillator_json(self, signal_type, frequency, rate):
-        t = np.linspace(0, 1, 2345)
+        t = np.linspace(0, 1, TIME_STAMPS)
         if signal_type == "Sine":
             data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
         elif signal_type == "Square":
@@ -2030,7 +2032,7 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMPS)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -2039,13 +2041,13 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMPS)]
                     adjusted_signals.append(signal)
 
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMPS):]
                 adjusted_signals.append(signal)
 
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
@@ -2080,7 +2082,7 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMPS)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -2089,25 +2091,25 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMPS)]
                     adjusted_signals.append(signal)
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMPS):]
                 adjusted_signals.append(signal)
             elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
                 # Case: The new signal completely overlaps this signal
                 signal_part1 = {
                     "type": signal["type"],
-                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMPS)],
                     "start_time": signal["start_time"],
                     "stop_time": new_start_time,
                     "parameters": signal["parameters"]
                 }
                 signal_part2 = {
                     "type": signal["type"],
-                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 2345):],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMPS):],
                     "start_time": new_stop_time,
                     "stop_time": signal["stop_time"],
                     "parameters": signal["parameters"]
@@ -2227,7 +2229,7 @@ class TimelineCanvas(FigureCanvas):
         if not self.signals:
             # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
             default_duration = 10  # seconds
-            t = np.linspace(0, default_duration, 2345 * default_duration)
+            t = np.linspace(0, default_duration, TIME_STAMPS * default_duration)
             signal_data = np.zeros_like(t)
             self.plot_signal_data(t, signal_data)
             return
@@ -2240,13 +2242,13 @@ class TimelineCanvas(FigureCanvas):
         self.signal_duration = max_stop_time
 
         # Initialize an empty array of zeros for the full duration
-        total_samples = int(max_stop_time * 2345)
+        total_samples = int(max_stop_time * TIME_STAMPS)
         combined_signal = np.zeros(total_samples)
 
         # Fill in the combined signal with each recorded signal's data
         for signal in self.signals:
-            start_sample = int(signal["start_time"] * 2345)
-            stop_sample = int(signal["stop_time"] * 2345)
+            start_sample = int(signal["start_time"] * TIME_STAMPS)
+            stop_sample = int(signal["stop_time"] * TIME_STAMPS)
             signal_duration = stop_sample - start_sample
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
             if len(signal["data"]) > 0:
@@ -2306,48 +2308,48 @@ class TimelineCanvas(FigureCanvas):
         # Generate the signal data based on the type and modified parameters
         
         if signal_type == "Sine":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
         elif signal_type == "Square":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
         elif signal_type == "Saw":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
         elif signal_type == "Triangle":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
         elif signal_type == "Chirp":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
         elif signal_type == "FM":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
         elif signal_type == "PWM":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
         elif signal_type == "Noise":
-            t = np.linspace(0, 1, 2345)
+            t = np.linspace(0, 1, TIME_STAMPS)
             return np.random.normal(0, 1, len(t)).tolist()
         elif signal_type == "Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
         elif signal_type == "Keyed Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
         elif signal_type == "ASR":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
                                 [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
         elif signal_type == "ADSR":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
                                 [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
@@ -2357,17 +2359,17 @@ class TimelineCanvas(FigureCanvas):
                                 0.25 * parameters["amplitude"]]).tolist()
         elif signal_type == "Exponential Decay":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
         elif signal_type == "PolyBezier":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
         elif signal_type == "Signal Envelope":
             duration = parameters["duration"]
-            num_samples = int(duration * 2345)
+            num_samples = int(duration * TIME_STAMPS)
             t = np.linspace(0, duration, num_samples)
             return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
         return np.zeros_like(t).tolist()
@@ -3424,7 +3426,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             "data": []
         }
 
-        t = np.linspace(0, 1, 2345).tolist()  # Convert numpy array to list
+        t = np.linspace(0, 1, TIME_STAMPS).tolist()  # Convert numpy array to list
         if signal_type == "Sine":
             base_signal["data"] = np.sin(2 * np.pi * 10 * np.array(t)).tolist()
         elif signal_type == "Square":
@@ -3442,7 +3444,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         elif signal_type == "Noise":
             base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
         elif signal_type == "Envelope":
-            base_signal["data"] = (np.linspace(0, 1, 2345) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
+            base_signal["data"] = (np.linspace(0, 1, TIME_STAMPS) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
         elif signal_type == "Keyed Envelope":
             base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
         elif signal_type == "ASR":
