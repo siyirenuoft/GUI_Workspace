@@ -35,9 +35,8 @@ class signal_segmentation_api:
         fft_envelope_filtered[(fft_freq_env > downsample_rate//2)] = 0
         fft_envelope_filtered[(fft_freq_env < -downsample_rate//2)] = 0
         filtered_signal = np.real(np.fft.ifft(fft_envelope_filtered))
-        # downsample to 200 samples/sec and plot the points together with the curve
-        downsampled_filtered_signal = filtered_signal[::int(sampling_rate / downsample_rate)]
-        low_freq_signal = downsampled_filtered_signal
+        # Keep original signal, no downsampling
+        low_freq_signal = filtered_signal
 
         return high_freq_signal, low_freq_signal
 
@@ -61,14 +60,14 @@ if __name__ == '__main__':
 
     # Perform signal segmentation
     downsample_rate = 200
-    downsample_t = np.linspace(0, duration, downsample_rate*duration, endpoint=False)
+    downsample_t = np.linspace(0, duration, len(product_signal), endpoint=False)
     
     high_freq_signal, low_freq_signal = signal_segmentation.signal_segmentation(product_signal, sampling_rate, downsample_rate)
     print(len(downsample_t), len(high_freq_signal), len(low_freq_signal))
 
     # Plot the high frequency signal
     plt.figure(figsize=(10, 4))
-    plt.plot(downsample_t, high_freq_signal, '-o')
+    plt.plot(downsample_t[:len(high_freq_signal)], high_freq_signal, '-o')
     plt.title('High Frequency Signal')
     plt.xlabel('Time [s]')
     plt.ylabel('Amplitude')
@@ -76,7 +75,7 @@ if __name__ == '__main__':
 
     # Plot the low frequency signal
     plt.figure(figsize=(10, 4))
-    plt.plot(downsample_t, low_freq_signal, '-o')
+    plt.plot(downsample_t[:len(low_freq_signal)], low_freq_signal, '-o')
     plt.title('Low Frequency Signal')
     plt.xlabel('Time [s]')
     plt.ylabel('Amplitude')

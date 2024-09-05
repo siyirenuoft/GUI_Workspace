@@ -31,6 +31,8 @@ import math
 import time
 from collections import deque
 
+from signal_segmentation_api import signal_segmentation_api
+
 TIME_STAMP = 44100
 
 def to_subscript(text):
@@ -160,10 +162,24 @@ class HapticCommandManager:
                 print(f"  Start Time: {signal_details['start_time']}")
                 print(f"  Stop Time: {signal_details['stop_time']}")
                 print(f"  Full Data Length: {len(signal_details['data'])}")
+                
+                # Print the frequency if available
                 if signal_details.get("parameters"):
                     print(f"  Frequency: {signal_details['parameters'].get('frequency', 'N/A')} Hz")
                 else:
                     print("  No frequency data available")
+
+                # Print High Frequency Data Length
+                if "high_freq" in signal_details:
+                    print(f"  High Frequency Data Length: {len(signal_details['high_freq'])}")
+                else:
+                    print("  No High Frequency Data available")
+
+                # Print Low Frequency Data Length
+                if "low_freq" in signal_details:
+                    print(f"  Low Frequency Data Length: {len(signal_details['low_freq'])}")
+                else:
+                    print("  No Low Frequency Data available")
 
         # Combine stop commands and active commands
         all_commands = stop_commands + active_commands
@@ -340,10 +356,13 @@ class DesignSaver:
                 'type': signal["type"],
                 'start_time': signal["start_time"],
                 'stop_time': signal["stop_time"],
-                'data': signal["data"],
+                'data': signal["data"],  # Original signal data
+                'high_freq': signal.get("high_freq", None),  # New high frequency data
+                'low_freq': signal.get("low_freq", None),    # New low frequency data
                 'parameters': signal["parameters"]
             } for signal in timeline_canvas.signals])
         return timeline_data
+
 
     def collect_mpl_canvas_data(self):
         return {
@@ -369,18 +388,23 @@ class DesignSaver:
             if actuator_id not in self.app_reference.actuator_signals:
                 self.app_reference.actuator_signals[actuator_id] = []
             
+            # Load signal data, including high and low frequency components
             self.app_reference.actuator_signals[actuator_id].append({
                 'type': signal_info['type'],
                 'start_time': signal_info['start_time'],
                 'stop_time': signal_info['stop_time'],
-                'data': signal_info['data'],
+                'data': signal_info['data'],  # Original data
+                'high_freq': signal_info.get('high_freq', None),  # High frequency data
+                'low_freq': signal_info.get('low_freq', None),    # Low frequency data
                 'parameters': signal_info['parameters']
             })
 
+        # Apply the signals to the timeline canvases
         for actuator_id, signals in self.app_reference.actuator_signals.items():
             if actuator_id in self.timeline_canvases:
                 self.timeline_canvases[actuator_id].signals = signals
                 self.timeline_canvases[actuator_id].plot_all_signals()
+
                 
 
     def apply_mpl_canvas_data(self, mpl_data):
@@ -1884,6 +1908,8 @@ class TimelineCanvas(FigureCanvas):
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
         self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(color)
+
+        self.segmentation_api = signal_segmentation_api()
         
         # Set spine color and customize appearance
         spine_color = to_rgba((240/255, 235/255, 229/255))
@@ -2084,16 +2110,57 @@ class TimelineCanvas(FigureCanvas):
             if signal_data:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
-                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters=None)
                     else:
-                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters=None)
+
+        # If the signal is not in custom or imported signals, prompt for parameters
         else:
             parameters = self.prompt_signal_parameters(signal_type)
             if parameters is not None:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
                     signal_data = self.generate_signal_data(signal_type, parameters)
+
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
                         self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
                     else:
@@ -2148,16 +2215,18 @@ class TimelineCanvas(FigureCanvas):
 
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
-        # Record the signal data and its parameters into the signals list
-        print("Reached Record Signal")
+        # Record the signal data, including original, high frequency, and low frequency components
+        print("Recorded")
         self.signals.append({
             "type": signal_type,
-            "data": signal_data,
+            "data": signal_data['data'],          # Store the original data as "data"
+            "high_freq": signal_data['high_freq'],  # Store high frequency data
+            "low_freq": signal_data['low_freq'],    # Store low frequency data
             "start_time": start_time,
             "stop_time": stop_time,
             "parameters": parameters
         })
-        print(self.signals)
+
 
     def plot_all_signals(self):
         if not self.signals:
@@ -2171,7 +2240,6 @@ class TimelineCanvas(FigureCanvas):
         # Determine the max stop time across all recorded signals
         max_stop_time = max([signal["stop_time"] for signal in self.signals])
 
-        # dragggg
         # Store the signal duration for use in dragging functionality
         self.signal_duration = max_stop_time
 
@@ -2184,12 +2252,14 @@ class TimelineCanvas(FigureCanvas):
             start_sample = int(signal["start_time"] * TIME_STAMP)
             stop_sample = int(signal["stop_time"] * TIME_STAMP)
             signal_duration = stop_sample - start_sample
+
+            # Use the original signal data for plotting
+            original_signal = signal["data"]
+
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            if len(signal["data"]) > 0:
-                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            if len(original_signal) > 0:
+                signal_data = np.tile(original_signal, int(np.ceil(signal_duration / len(original_signal))))[:signal_duration]
             else:
-                # Handle the case where signal["data"] is empty
-                # You can either skip this signal or generate a default signal.
                 print(f"Warning: signal data is empty for signal {signal['type']}.")
                 signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
 
@@ -2198,6 +2268,7 @@ class TimelineCanvas(FigureCanvas):
         # Generate time array for the x-axis
         t = np.linspace(0, max_stop_time, total_samples)
         self.plot_signal_data(t, combined_signal)
+
 
     def plot_signal_data(self, t, signal_data):
         # Clear the current plot and plot the new signal
@@ -2755,6 +2826,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         return super(Haptics_App, self).eventFilter(source, event)
 
     def update_current_amplitudes(self, time_position):
+        # Tracing the low frequency data
+
         self.current_amplitudes.clear()
         current_signals = {}  # New variable to store full signal details for comparison
 
@@ -2763,12 +2836,12 @@ class Haptics_App(QtWidgets.QMainWindow):
                 if signal["start_time"] <= time_position <= signal["stop_time"]:
                     signal_duration = signal["stop_time"] - signal["start_time"]
                     relative_position = (time_position - signal["start_time"]) / signal_duration
-                    index = int(relative_position * len(signal["data"]))
+                    index = int(relative_position * len(signal["low_freq"]))
                     
                     # Ensure index is within bounds
-                    index = max(0, min(index, len(signal["data"]) - 1))
+                    index = max(0, min(index, len(signal["low_freq"]) - 1))
                     
-                    amplitude = signal["data"][index]
+                    amplitude = signal["low_freq"][index]
                     
                     # Update current_amplitudes with only the amplitude and frequency
                     self.current_amplitudes[actuator_id] = {
@@ -2782,6 +2855,8 @@ class Haptics_App(QtWidgets.QMainWindow):
                         "start_time": signal["start_time"],
                         "stop_time": signal["stop_time"],
                         "data": signal["data"],
+                        "high_freq": signal['high_freq'],
+                        "low_freq": signal['low_freq'],
                         "parameters": signal.get("parameters", {})
                     }
 
