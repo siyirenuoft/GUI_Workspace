@@ -464,34 +464,11 @@ class MplCanvas(FigureCanvas):
         
         if self.current_signal is None:
             self.current_signal = new_signal
-            self.current_signal_sampling_rate = new_signal_sampling_rate
-            common_sampling_rate = new_signal_sampling_rate
-            overall_t = len(self.current_signal)/new_signal_sampling_rate
+            overall_t = len(self.current_signal)/TIME_STAMP
+
             
         else:
-            common_sampling_rate = min(self.current_signal_sampling_rate, new_signal_sampling_rate)
-            # Resample both signals to the smaller sampling rate
-            if self.current_signal_sampling_rate > common_sampling_rate:
-                current_signal_length = len(self.current_signal)
-                resample_factor = self.current_signal_sampling_rate / common_sampling_rate
-                self.current_signal = np.interp(
-                    np.arange(0, current_signal_length, resample_factor),
-                    np.arange(0, current_signal_length),
-                    self.current_signal
-                )
-                self.current_signal_sampling_rate = common_sampling_rate
-
-            if new_signal_sampling_rate > common_sampling_rate:
-                new_signal_length = len(new_signal)
-                resample_factor = new_signal_sampling_rate / common_sampling_rate
-                new_signal = np.interp(
-                    np.arange(0, new_signal_length, resample_factor),
-                    np.arange(0, new_signal_length),
-                    new_signal
-                )
-                new_signal_sampling_rate = common_sampling_rate
-
-            # Now both signals have the same sampling rate, compare lengths and repeat the shorter one
+            # compare lengths and repeat the shorter one
             current_signal_length = len(self.current_signal)
             new_signal_length = len(new_signal)
             
@@ -509,18 +486,14 @@ class MplCanvas(FigureCanvas):
                 self.current_signal = new_signal
             
             # Calculate the total time and adjust for plotting
-            overall_t = len(self.current_signal) / common_sampling_rate
+            overall_t = len(self.current_signal) / TIME_STAMP
  
         t = np.linspace(0, overall_t, int(overall_t * TIME_STAMP))  # Generate t based on TIME_STAMP
 
-        # Resample the current signal to match TIME_STAMP
-        resample_factor = common_sampling_rate / TIME_STAMP
-        resampled_signal = np.interp(np.linspace(0, len(self.current_signal), int(len(self.current_signal) / resample_factor)),
-                                    np.arange(0, len(self.current_signal)),
-                                    self.current_signal)
+
 
         # Plot the resampled signal
-        self.plot(t, resampled_signal)
+        self.plot(t, self.current_signal)
 
 
     def clear_plot(self):
@@ -3302,14 +3275,24 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 if not ok:
                     return  # User canceled input, exit
+
                 # Read the CSV file
                 data = self.read_csv_file(file_path)
+                if sampling_rate != TIME_STAMP:
+                    current_signal_length = len(data)
+                    resample_factor = sampling_rate / TIME_STAMP
+                    data = np.interp(
+                        np.linspace(0, current_signal_length, int(current_signal_length / resample_factor)),
+                        np.arange(0, current_signal_length),
+                        data
+                    )
+                    sampling_rate = TIME_STAMP
                 print(f"CSV Data: {data}")  # Debugging print statement
 
                 # Extract the signal type from the CSV filename
                 signal_type = os.path.splitext(os.path.basename(file_path))[0]
                 print(f"Signal Type: {signal_type}")  # Debugging print statement
-
+                print("data length", len(data))
                 # Convert CSV data to the required format with the max value as gain
                 waveform_data = self.convert_csv_to_waveform_format(data, signal_type, sampling_rate)
 
