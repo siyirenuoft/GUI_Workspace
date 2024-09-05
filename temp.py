@@ -1,113 +1,32 @@
 import numpy as np
-from scipy import signal
 import matplotlib.pyplot as plt
 
-def generate_chirp_waveform(data, num_points=1000, sampling_rate=1000):
-    # Extract top-level gain and bias
-    current_level = data.get('value0', {})
-    gain = current_level.get('gain', 1.0)
-    bias = current_level.get('bias', 0.0)
-    
+def generate_pwm_signal(frequency, duty_cycle, duration, sampling_rate=44100):
     # Time array
-    t = np.linspace(0, num_points / sampling_rate, num_points)
+    t = np.linspace(0, duration, int(sampling_rate * duration))
     
-    # Extract the nested structure for the chirp
-    oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
-    x_component = oscillator.get('x', {})
+    # Calculate the period of the PWM signal
+    period = 1 / frequency
     
-    # Extract frequency modulation parameters
-    lhs = x_component.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOperator', {}).get('lhs', {})
-    f0 = lhs.get('gain', 1) / (2 * np.pi)  # Start frequency in Hz
-    chirp_rate = lhs.get('bias', 628.3185307179587) / (2 * np.pi)  # Chirp rate in Hz/s
-    print("lhs",lhs)
-    print("f0",f0)
-    print("chirp_rate",chirp_rate)
+    # Generate the PWM signal
+    pwm_signal = ((t % period) < (duty_cycle / 100) * period).astype(float)
+    
+    return t, pwm_signal
 
-    # Calculate the end frequency based on chirp rate
-    f1 = f0 + chirp_rate * t[-1]
-    
-    # Generate the chirp waveform
-    waveform = gain * signal.chirp(t, f0=f0, f1=f1, t1=t[-1], method='linear') + bias
-    
-    return t, waveform
+# Example usage
+frequency = 5.0      # Frequency in Hz
+duty_cycle = 20.0    # Duty cycle in percentage (0 to 100)
+duration = 2.0       # Duration in seconds
 
-# Example JSON data for the chirp signal
-json_data = {
-    "value0": {
-        "gain": 1.0,
-        "bias": 0.0,
-        "m_ptr": {
-            "polymorphic_id": 2147483649,
-            "polymorphic_name": "tact::Signal::Model<tact::Sine>",
-            "ptr_wrapper": {
-                "valid": 1,
-                "data": {
-                    "Concept": {},
-                    "m_model": {
-                        "IOscillator": {
-                            "x": {
-                                "gain": 1.0,
-                                "bias": 0.0,
-                                "m_ptr": {
-                                    "polymorphic_id": 2147483650,
-                                    "polymorphic_name": "tact::Signal::Model<tact::Product>",
-                                    "ptr_wrapper": {
-                                        "valid": 1,
-                                        "data": {
-                                            "Concept": {},
-                                            "m_model": {
-                                                "IOperator": {
-                                                    "lhs": {
-                                                        "gain": 314.1592653589793,  # Angular frequency (rad/s)
-                                                        "bias": 628.3185307179587,  # Chirp rate (rad/s^2)
-                                                        "m_ptr": {
-                                                            "polymorphic_id": 2147483651,
-                                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                                            "ptr_wrapper": {
-                                                                "valid": 1,
-                                                                "data": {
-                                                                    "Concept": {},
-                                                                    "m_model": {}
-                                                                }
-                                                            }
-                                                        }
-                                                    },
-                                                    "rhs": {
-                                                        "gain": 1.0,
-                                                        "bias": 0.0,
-                                                        "m_ptr": {
-                                                            "polymorphic_id": 3,
-                                                            "ptr_wrapper": {
-                                                                "valid": 1,
-                                                                "data": {
-                                                                    "Concept": {},
-                                                                    "m_model": {}
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-# Generate the waveform
-t, waveform = generate_chirp_waveform(json_data)
+# Generate the PWM signal
+t, pwm_signal = generate_pwm_signal(frequency=frequency, duty_cycle=duty_cycle, duration=duration)
 
 # Plotting the waveform to visualize it
 plt.figure(figsize=(10, 4))
-plt.plot(t, waveform, color='red')
+plt.plot(t, pwm_signal, color='blue')
 plt.xlabel('Time (s)')
 plt.ylabel('Amplitude')
-plt.title('Chirp Signal')
+plt.title(f'PWM Signal - Frequency: {frequency} Hz, Duty Cycle: {duty_cycle}%')
+plt.ylim(-0.1, 1.1)  # Set y-axis limits for better visualization
 plt.grid(True)
 plt.show()
