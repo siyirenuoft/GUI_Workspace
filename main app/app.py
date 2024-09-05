@@ -537,15 +537,6 @@ class MplCanvas(FigureCanvas):
                     customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-            # Handle envelopes
-            elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]:
-                dialog = EnvelopeDialog(signal_type, self)
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    config = dialog.get_config()
-                    parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
-                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
-
             # If a customized signal was created or retrieved, add it to the plot
             if customized_signal:
                 self.add_signal(customized_signal, combine=True)
@@ -553,72 +544,6 @@ class MplCanvas(FigureCanvas):
         self.app_reference.first_signal_drop += 1
         print("drop",self.app_reference.first_signal_drop)
 
-
-    def generate_custom_envelope_json(self, signal_type, duration, amplitude):
-        num_samples = int(duration * TIME_STAMP)  # Adjust the number of samples to match the duration
-        t = np.linspace(0, duration, num_samples)
-        # t = np.linspace(0, duration, TIME_STAMP)  # Ensure that the time vector spans the entire duration
-
-        if signal_type == "Envelope":
-            data = (amplitude * np.sin(2 * np.pi * 5 * t)).tolist()
-        elif signal_type == "Keyed Envelope":
-            data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
-        elif signal_type == "ASR":
-            data = np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
-                                [lambda t: amplitude * (t / (0.3 * duration)), amplitude]).tolist()
-        elif signal_type == "ADSR":
-            data = np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
-                                [lambda t: amplitude * (t / (0.1 * duration)),
-                                lambda t: amplitude * (1 - 5 * (t - 0.1 * duration) / duration),
-                                0.5 * amplitude,
-                                lambda t: 0.5 * amplitude - 0.25 * amplitude * (t - 0.5 * duration) / duration,
-                                0.25 * amplitude]).tolist()
-        elif signal_type == "Exponential Decay":
-            data = (amplitude * np.exp(-5 * t / duration)).tolist()  # Scale the decay based on duration
-        elif signal_type == "PolyBezier":
-            data = (amplitude * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
-        elif signal_type == "Signal Envelope":
-            data = (amplitude * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
-        else:
-            data = np.zeros_like(t).tolist()
-
-        return {
-            "value0": {
-                "gain": amplitude,
-                "bias": 0.0,
-                "sampling_rate": TIME_STAMP,
-                "m_ptr": {
-                    "polymorphic_id": 2147483649,
-                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
-                    "ptr_wrapper": {
-                        "valid": 1,
-                        "data": {
-                            "Concept": {},
-                            "m_model": {
-                                "IOscillator": {
-                                    "x": {
-                                        "gain": 1.0,
-                                        "bias": 0.0,
-                                        "m_ptr": {
-                                            "polymorphic_id": 2147483650,
-                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                            "ptr_wrapper": {
-                                                "valid": 1,
-                                                "data": {
-                                                    "Concept": {},
-                                                    "m_model": {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "data": data
-        }
 
 
     def generate_custom_oscillator_json(self, signal_type, frequency, rate):
@@ -765,45 +690,6 @@ class OscillatorDialog(QDialog):
         return {
             "frequency": self.frequency_input.value(),
             "rate": self.rate_input.value()
-        }
-
-class EnvelopeDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 1000)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-        self.duration_input.setDecimals(2)  # Allow up to two decimal places
-        self.duration_input.setSingleStep(0.1)  # Increment in 0.1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-
-        # Configure the amplitude input
-        self.amplitude_input = QDoubleSpinBox()
-        self.amplitude_input.setRange(-1000, 1000)  # Allow amplitude to be any value between -10 and 10
-        self.amplitude_input.setValue(1)  # Default value
-        self.amplitude_input.setDecimals(2)  # Allow up to two decimal places
-        self.amplitude_input.setSingleStep(0.1)  # Increment in 0.1 steps
-        form_layout.addRow("Amplitude:", self.amplitude_input)
-        
-        layout.addLayout(form_layout)
-        
-        # OK and Cancel buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        return {
-            "duration": self.duration_input.value(),
-            "amplitude": self.amplitude_input.value()
         }
 
 # Define the ACTUATOR_CONFIG dictionary
@@ -2234,13 +2120,6 @@ class TimelineCanvas(FigureCanvas):
             "FM": OscillatorDialog,
             "PWM": OscillatorDialog,
             "Noise": OscillatorDialog,
-            "Envelope": EnvelopeDialog,
-            "Keyed Envelope": EnvelopeDialog,
-            "ASR": EnvelopeDialog,
-            "ADSR": EnvelopeDialog,
-            "Exponential Decay": EnvelopeDialog,
-            "PolyBezier": EnvelopeDialog,
-            "Signal Envelope": EnvelopeDialog
         }
         
         # Get the dialog class based on signal type
@@ -2386,43 +2265,7 @@ class TimelineCanvas(FigureCanvas):
         elif signal_type == "Noise":
             t = np.linspace(0, 1, TIME_STAMP)
             return np.random.normal(0, 1, len(t)).tolist()
-        elif signal_type == "Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t)).tolist()
-        elif signal_type == "Keyed Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
-        elif signal_type == "ASR":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
-        elif signal_type == "ADSR":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
-                                lambda t: parameters["amplitude"] * (1 - 5 * (t - 0.1 * duration) / duration),
-                                0.5 * parameters["amplitude"],
-                                lambda t: 0.5 * parameters["amplitude"] - 0.25 * parameters["amplitude"] * (t - 0.5 * duration) / duration,
-                                0.25 * parameters["amplitude"]]).tolist()
-        elif signal_type == "Exponential Decay":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
-        elif signal_type == "PolyBezier":
-            duration = parameters["duration"]
-            num_samples = int(duration * TIME_STAMP)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
-        elif signal_type == "Signal Envelope":
+
             duration = parameters["duration"]
             num_samples = int(duration * TIME_STAMP)
             t = np.linspace(0, duration, num_samples)
@@ -3436,9 +3279,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         oscillators.setText(0, "Oscillators")
         oscillators.setToolTip(0, "Oscillators")  # Set tooltip
 
-        envelopes = QTreeWidgetItem(tree)
-        envelopes.setText(0, "Envelopes")
-        envelopes.setToolTip(0, "Envelopes")  # Set tooltip
 
         self.customizes = QTreeWidgetItem(tree)
         self.customizes.setText(0, "Customized Signals")
@@ -3452,14 +3292,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
         for item in osc_items:
             child = QTreeWidgetItem(oscillators)
-            child.setText(0, item)
-            child.setToolTip(0, item)  # Set tooltip
-            self.signal_templates[item] = self.generate_signal(item)
-
-        # Add child items to "Envelopes"
-        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier", "Signal Envelope"]
-        for item in env_items:
-            child = QTreeWidgetItem(envelopes)
             child.setText(0, item)
             child.setToolTip(0, item)  # Set tooltip
             self.signal_templates[item] = self.generate_signal(item)
@@ -3561,31 +3393,12 @@ class Haptics_App(QtWidgets.QMainWindow):
             base_signal["data"] = (np.where(np.sin(2 * np.pi * 10 * np.array(t)) >= 0, 1, -1)).tolist()
         elif signal_type == "Noise":
             base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
-        elif signal_type == "Envelope":
-            base_signal["data"] = (np.linspace(0, 1, TIME_STAMP) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
-        elif signal_type == "Keyed Envelope":
-            base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
-        elif signal_type == "ASR":
-            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.3, np.array(t) >= 0.3], [lambda t: 3.33 * t, 1])).tolist()
-        elif signal_type == "ADSR":
-            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.1, np.array(t) < 0.2, np.array(t) < 0.5, np.array(t) < 0.7, np.array(t) >= 0.7], [lambda t: 10 * t, lambda t: 1 - 5 * (t - 0.1), 0.5, lambda t: 0.5 - 0.25 * (t - 0.5), 0.25])).tolist()
-        elif signal_type == "Exponential Decay":
-            base_signal["data"] = (np.exp(-5 * np.array(t))).tolist()
-        elif signal_type == "PolyBezier":
-            base_signal["data"] = (np.array(t)**3 - 3 * np.array(t)**2 + 3 * np.array(t)).tolist()
-        elif signal_type == "Signal Envelope":
-            base_signal["data"] = (np.abs(np.sin(2 * np.pi * 3 * np.array(t)))).tolist()
-        elif signal_type in self.custom_signals:  # Check if it's a custom signal
-            base_signal["data"] = self.custom_signals.get(signal_type, {"data": np.zeros_like(t).tolist()})["data"]
+
         else:
             base_signal["data"] = np.zeros_like(t).tolist()
 
         return base_signal
 
-    # def add_signal(self, signal_type, combine):
-    #     new_signal = self.generate_signal(signal_type)
-    #     print(new_signal)
-    #     self.maincanvas.add_signal(new_signal, combine=combine)
 
     def signal_exists(self, signal):
         for existing_signal in self.custom_signals.values():
