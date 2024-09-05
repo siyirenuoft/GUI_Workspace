@@ -30,7 +30,7 @@ import math
 import time
 from collections import deque
 
-TIME_STAMPS = 2345 # Total time * TIME_STAMPS is the sampling rate
+TIME_STAMPS = 2345 # General Sampling Rate
 
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
@@ -50,6 +50,8 @@ class HapticCommandManager:
         self.active_actuators = set()
 
         self.last_sent_commands = [] # for the end of the slider use
+        self.active_signals = {}  # New variable to track currently playing signals
+
 
     def detect_leaving_edges(self, current_amplitudes):
         current_actuators = set(current_amplitudes.keys())
@@ -102,32 +104,65 @@ class HapticCommandManager:
     def start_playback(self):
         self.is_playing = True
         self.command_queue.clear()
+        self.active_signals.clear()  # Clear previous active signals to ensure new ones are detected
 
     def stop_playback(self):
         self.is_playing = False
-        # Immediately send stop commands for all active actuators
+        # Generate stop commands for all active actuators based on the current active signals
         stop_commands = [
-            (addr, 0, 0, 0) for addr in set(cmd[0] for cmd in self.command_queue)
+            (self.actuator_id_to_addr(actuator_id), 0, 0, 0) 
+            for actuator_id in self.active_signals.keys()
         ]
-        print("STOP")
+        #print("STOP")
         self.command_queue.clear()
+        
+        # Send STOP commands to the actuators
         for cmd in stop_commands:
             self.ble_api.send_command(*cmd)
             print(f"[Play Button Stopping] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
             time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
 
-    def update(self, current_amplitudes):
+        # Clear active actuators and active signals after sending the stop commands
+        self.active_actuators.clear()
+        self.active_signals.clear()
+
+
+    def update(self, current_amplitudes, current_signals):
+        """Update the playing signals if there is a change."""
         if not self.is_playing:
             return
 
         # Detect leaving edges and generate stop commands
         stop_commands = self.detect_leaving_edges(current_amplitudes)
 
-        # Prepare all commands for active actuators
+        # Prepare all commands for active actuators, ensuring we handle None parameters safely
         active_commands = [
-            self.prepare_command(actuator_id, data['amplitude'], data.get('frequency', 100))
-            for actuator_id, data in current_amplitudes.items()
+            self.prepare_command(
+                actuator_id,
+                signal_details["current_amplitude"],
+                # Safely handle missing "parameters" by checking if it's None
+                signal_details.get("parameters", {}).get('frequency', 100) if signal_details.get("parameters") else 100
+            )
+            for actuator_id, signal_details in current_amplitudes.items()
         ]
+
+        # If active_signals is empty, treat it as the first update and force signal detection
+        if not self.active_signals or self.active_signals != current_signals:
+            # Update active signals if there's a change
+            self.active_signals = current_signals.copy()
+
+            # Log the current signals
+            print("New signals detected or first update. Updating...")
+            for actuator_id, signal_details in current_signals.items():
+                print(f"Actuator ID: {actuator_id}")
+                print(f"  Type: {signal_details['type']}")
+                print(f"  Start Time: {signal_details['start_time']}")
+                print(f"  Stop Time: {signal_details['stop_time']}")
+                print(f"  Full Data Length: {len(signal_details['data'])}")
+                if signal_details.get("parameters"):
+                    print(f"  Frequency: {signal_details['parameters'].get('frequency', 'N/A')} Hz")
+                else:
+                    print("  No frequency data available")
 
         # Combine stop commands and active commands
         all_commands = stop_commands + active_commands
@@ -138,7 +173,9 @@ class HapticCommandManager:
         # Add all commands to the queue
         self.command_queue.extend(all_commands)
 
+        # Process the commands
         self.process_commands()
+
 
     def end_of_slider(self):
         self.is_playing = False
@@ -147,8 +184,8 @@ class HapticCommandManager:
         stop_commands = [
             (addr, 0, 0, 0) for addr in set(cmd[0] for cmd in self.command_queue or self.last_sent_commands)
         ]
-        print("END OF SLIDER")
-        print(self.command_queue)
+        #print("END OF SLIDER")
+        #print(self.command_queue)
         self.command_queue.clear()
         for cmd in stop_commands:
             self.ble_api.send_command(*cmd)
@@ -433,7 +470,7 @@ class MplCanvas(FigureCanvas):
                 self.current_signal = np.tile(self.current_signal, repeat_factor)[:len(new_signal)]
             
             if combine:
-                self.current_signal = self.current_signal + new_signal
+                self.current_signal = self.current_signal * new_signal
             else:
                 self.current_signal = new_signal
 
@@ -2792,7 +2829,10 @@ class Haptics_App(QtWidgets.QMainWindow):
             total_time = self.calculate_total_time()
             if total_time > 0:
                 time_position = (adjusted_new_pos / adjusted_width) * total_time
-                self.update_current_amplitudes(time_position)
+
+                # Capture both current_amplitudes and current_signals from update_current_amplitudes
+                current_amplitudes, current_signals = self.update_current_amplitudes(time_position)
+                
                 self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
                 print("Warning: No signals found or invalid total time.")
@@ -2807,13 +2847,13 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.slider_timer.stop()
                 self.slider_moving = False
                 # Change the button icon to the run icon
-          
                 self.pushButton_5.setIcon(self.run_icon)
                 
                 # To send ending condition if the slider reaches the end.
                 self.haptic_manager.end_of_slider()
         
-        self.haptic_manager.update(self.current_amplitudes)
+        # Pass both current_amplitudes and current_signals to the haptic manager's update
+        self.haptic_manager.update(current_amplitudes, current_signals)
 
 
 
@@ -2857,6 +2897,8 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     def update_current_amplitudes(self, time_position):
         self.current_amplitudes.clear()
+        current_signals = {}  # New variable to store full signal details for comparison
+
         for actuator_id, signals in self.actuator_signals.items():
             for signal in signals:
                 if signal["start_time"] <= time_position <= signal["stop_time"]:
@@ -2869,29 +2911,27 @@ class Haptics_App(QtWidgets.QMainWindow):
                     
                     amplitude = signal["data"][index]
                     
-                    # Create a dictionary for this actuator
+                    # Update current_amplitudes with only the amplitude and frequency
                     self.current_amplitudes[actuator_id] = {
-                        "amplitude": amplitude,
-                        "type": signal["type"]
+                        "current_amplitude": amplitude,
+                        "parameters": signal.get("parameters", {})
                     }
-                    
-                    # Safely add frequency if it exists in the signal parameters
-                    if signal.get("parameters") is not None and "frequency" in signal["parameters"]:
-                        self.current_amplitudes[actuator_id]["frequency"] = signal["parameters"]["frequency"]
-                    
-                    break  # Assume only one signal per actuator at a given time
-        
-        self.haptic_manager.update(self.current_amplitudes)
 
-        if False:# Print the current amplitudes and frequencies
-            print(f"Current Amplitudes and Frequencies at time {time_position:.2f}s:")
-            for actuator_id, data in self.current_amplitudes.items():
-                amplitude_str = f"{data['amplitude']:.4f}"
-                type_str = f"Type: {data['type']}"
-                freq_str = f"Freq: {data['frequency']:.2f}Hz" if 'frequency' in data else "Freq: N/A"
-                print(f"  Actuator {actuator_id}: {amplitude_str} | {type_str} | {freq_str}")
-            print("--------------------")  # Separator for readability
-        
+                    # Update current_signals with the full signal details for comparison
+                    current_signals[actuator_id] = {
+                        "type": signal["type"],
+                        "start_time": signal["start_time"],
+                        "stop_time": signal["stop_time"],
+                        "data": signal["data"],
+                        "parameters": signal.get("parameters", {})
+                    }
+
+                    break  # Only handle one signal per actuator at a time
+
+        # Return both the current_amplitudes and current_signals
+        return self.current_amplitudes, current_signals
+
+
     def update_actuator_text(self):
         
         # Find the global largest stop time across all actuators
