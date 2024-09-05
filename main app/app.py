@@ -3406,20 +3406,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
         child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
 
-    
-            
-    def remove_actuator_from_timeline(self, actuator_id):
-        if actuator_id in self.timeline_widgets:
-            actuator_widget, actuator_label = self.timeline_widgets.pop(actuator_id)
-            self.timeline_layout.removeWidget(actuator_widget)
-            actuator_widget.deleteLater()  # Properly delete the widget
-            self.update_pushButton_5_state()
-
-        # Remove the associated signal data
-        if actuator_id in self.actuator_signals:
-            del self.actuator_signals[actuator_id]
-
-
 
 
 
