@@ -71,23 +71,25 @@ class HapticCommandManager:
         return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
 
     def map_amplitude_to_duty(self, amplitude):
-        return int(round((amplitude + 1) * 7.5))
+        # Map amplitude from 0 to 1 to 0 to 15
+        return int(round(amplitude * 15))
+
 
     def map_frequency_to_freq_param(self, frequency):
-        if frequency <= 100:
-            return 0
-        else:
-            mapped = int(round((frequency - 100) / (500 - 100) * 7))
-            return max(0, min(mapped, 7))
+        # Define the frequency set
+        frequency_set = [123, 145, 170, 200, 235, 275, 322, 384]
+        
+        # Find the closest frequency in the set
+        closest_freq = min(frequency_set, key=lambda x: abs(x - frequency))
+        
+        # Return the index of the closest frequency
+        return frequency_set.index(closest_freq)
 
     def prepare_command(self, actuator_id, amplitude, frequency):
         addr = self.actuator_id_to_addr(actuator_id)
-        if frequency <= 100:
-            duty = self.map_amplitude_to_duty(amplitude)
-            freq = 0
-        else:
-            duty = 8
-            freq = self.map_frequency_to_freq_param(frequency)
+        duty = self.map_amplitude_to_duty(amplitude)
+        freq = self.map_frequency_to_freq_param(frequency)
+        
         return (addr, duty, freq, 1)  # 1 for start
 
     def process_commands(self):
@@ -143,8 +145,8 @@ class HapticCommandManager:
             self.prepare_command(
                 actuator_id,
                 signal_details["current_amplitude"],
-                # Safely handle missing "parameters" by checking if it's None
-                signal_details.get("parameters", {}).get('frequency', 100) if signal_details.get("parameters") else 100
+                # Safely handle missing "high_freq" by checking if it exists in current_signals
+                current_signals[actuator_id]["high_freq"][0] if "high_freq" in current_signals[actuator_id] else 100
             )
             for actuator_id, signal_details in current_amplitudes.items()
         ]
@@ -163,15 +165,9 @@ class HapticCommandManager:
                 print(f"  Stop Time: {signal_details['stop_time']}")
                 print(f"  Full Data Length: {len(signal_details['data'])}")
                 
-                # Print the frequency if available
-                if signal_details.get("parameters"):
-                    print(f"  Frequency: {signal_details['parameters'].get('frequency', 'N/A')} Hz")
-                else:
-                    print("  No frequency data available")
-
-                # Print High Frequency Data Length
+                # Print the frequency from high_freq if available
                 if "high_freq" in signal_details:
-                    print(f"  High Frequency Data Length: {len(signal_details['high_freq'])}")
+                    print(f"  First High Frequency Value: {signal_details['high_freq'][0]}")
                 else:
                     print("  No High Frequency Data available")
 
