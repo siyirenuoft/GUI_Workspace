@@ -32,11 +32,175 @@ import math
 import time
 from collections import deque
 
+from signal_segmentation_api import signal_segmentation_api
+
 TIME_STAMP = 44100
 
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
+
+class BluetoothDeviceSearchThread(QtCore.QThread):
+    devices_found = QtCore.pyqtSignal(list)
+
+    def __init__(self, ble_api):
+        super().__init__()
+        self.ble_api = ble_api
+
+    def run(self):
+        # This method will be executed in a separate thread
+        devices = self.ble_api.get_ble_devices()  # Use your BLE API to get device list
+        self.devices_found.emit(devices)  # Emit the devices found signal
+
+class BluetoothConnectThread(QtCore.QThread):
+    connection_result = QtCore.pyqtSignal(bool)
+
+    def __init__(self, ble_api, device_name):
+        super().__init__()
+        self.ble_api = ble_api
+        self.device_name = device_name
+
+    def run(self):
+        success = self.ble_api.connect_ble_device(self.device_name)
+        self.connection_result.emit(success)  # Emit the result (success or failure)
+
+class BluetoothConnectDialog(QtWidgets.QDialog):
+    device_selected_signal = QtCore.pyqtSignal(bool) # This signal is for transmitting both connect and disconnect boolean
+
+    def __init__(self, ble_api, parent=None):
+        super(BluetoothConnectDialog, self).__init__(parent)
+        self.setWindowTitle("Connect to Bluetooth Device")
+        self.ble_api = ble_api
+
+        # Layout for the popup window
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Label for searching status
+        self.status_label = QtWidgets.QLabel("Searching For Devices...", self)
+        layout.addWidget(self.status_label)
+
+        # Create a horizontal layout for the buttons
+        button_layout = QtWidgets.QHBoxLayout()
+
+        # Create a dropdown for available devices
+        self.device_dropdown = QtWidgets.QComboBox(self)
+        layout.addWidget(self.device_dropdown)
+
+        # Create a Search button
+        self.search_button = QtWidgets.QPushButton("Search", self)
+        self.search_button.setEnabled(False)  # Disabled while searching
+        button_layout.addWidget(self.search_button)
+
+        # Create a Connect button
+        self.connect_button = QtWidgets.QPushButton("Connect", self)
+        self.connect_button.setEnabled(False)  # Disabled until devices are found
+        button_layout.addWidget(self.connect_button)
+
+        layout.addLayout(button_layout)
+
+        # Signal-slot connection for the buttons
+        self.connect_button.clicked.connect(self.connect_to_device)
+        self.search_button.clicked.connect(self.start_search)
+
+        # Start the initial search for devices in a background thread
+        self.start_search()
+
+    def start_search(self):
+        """Start searching for devices in the background thread."""
+        self.device_dropdown.clear()  # Clear the dropdown list
+        self.connect_button.setEnabled(False)  # Disable connect button while searching
+        self.status_label.setText("Searching For Devices. Be Right Back...")  # Update status label
+        self.search_button.setEnabled(False)  # Disable search button while searching
+
+        # Start the search in a new background thread
+        self.search_thread = BluetoothDeviceSearchThread(self.ble_api)
+        self.search_thread.devices_found.connect(self.load_devices)
+        self.search_thread.start()
+
+    def load_devices(self, devices):
+        """Load BLE devices into the dropdown list once the search is complete."""
+        if devices:
+            self.device_dropdown.addItems(devices)
+            self.connect_button.setEnabled(True)  # Enable connect button when devices are found
+            self.status_label.setText(f"Found {len(devices)} device(s).")
+        else:
+            self.status_label.setText("No devices found.")
+        self.search_button.setEnabled(True)  # Enable search button after search completes
+
+    def connect_to_device(self):
+        """Attempt to connect to the selected device in a background thread."""
+        selected_device = self.device_dropdown.currentText()
+        if selected_device:
+            # Lock the buttons and show "Connecting to device..."
+            self.connect_button.setEnabled(False)
+            self.search_button.setEnabled(False)
+            self.status_label.setText(f"Connecting to {selected_device}...")
+
+            # Start the connection in a background thread
+            self.connect_thread = BluetoothConnectThread(self.ble_api, selected_device)
+            self.connect_thread.connection_result.connect(self.on_connection_finished)
+            self.connect_thread.start()
+
+    def on_connection_finished(self, success):
+        """Handle the result of the Bluetooth connection attempt."""
+        # Emit the connection result signal
+        self.device_selected_signal.emit(success)
+    
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # Show the connection status
+        QtWidgets.QMessageBox.information(self, "Connection Status",
+                                        f"Connection {'Succeeded' if success else 'Failed'}!")
+
+        # If the connection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if connection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Connection failed. Please try again.")
+
+    def disconnect_from_device(self):
+        """Attempt to disconnect the connected device."""
+        # Lock the buttons and show "Disconnecting from device..."
+        self.connect_button.setEnabled(False)
+        self.search_button.setEnabled(False)
+        self.status_label.setText(f"Disconnecting from {self.device_dropdown.currentText()}...")
+
+        # Attempt to disconnect
+        success = self.ble_api.disconnect_ble_device()
+
+        # Show the disconnection status
+        QtWidgets.QMessageBox.information(self, "Disconnection Status",
+                                        f"Disconnection {'Succeeded' if success else 'Failed'}!")
+
+        # Emit signal for future use
+        self.device_selected_signal.emit(success)
+
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # If the disconnection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if disconnection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Disconnection failed. Please try again.")
+
+    def show_disconnect_confirmation(self):
+        """Show a confirmation dialog before disconnecting."""
+        reply = QtWidgets.QMessageBox.question(self, 'Disconnect Bluetooth Device',
+                                            "Are you sure you want to disconnect?",
+                                            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                                            QtWidgets.QMessageBox.StandardButton.No)
+        
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.disconnect_from_device()  # Call the method to disconnect
+        else:
+            self.status_label.setText("Disconnection cancelled.")
+
 
 class HapticCommandManager:
     def __init__(self, ble_api):
@@ -45,7 +209,7 @@ class HapticCommandManager:
         self.last_send_time = 0
         self.is_playing = False
         self.CHAIN_JUMP_INDEX = 16
-        self.CMD_SENDING_FREQ = 200  # Hz
+        self.CMD_SENDING_FREQ = 1  # Hz
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
         self.last_sent_addr = None
@@ -70,23 +234,25 @@ class HapticCommandManager:
         return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
 
     def map_amplitude_to_duty(self, amplitude):
-        return int(round((amplitude + 1) * 7.5))
+        # Map amplitude from 0 to 1 to 0 to 15
+        return int(round(amplitude * 15))
+
 
     def map_frequency_to_freq_param(self, frequency):
-        if frequency <= 100:
-            return 0
-        else:
-            mapped = int(round((frequency - 100) / (500 - 100) * 7))
-            return max(0, min(mapped, 7))
+        # Define the frequency set
+        frequency_set = [123, 145, 170, 200, 235, 275, 322, 384]
+        
+        # Find the closest frequency in the set
+        closest_freq = min(frequency_set, key=lambda x: abs(x - frequency))
+        
+        # Return the index of the closest frequency
+        return frequency_set.index(closest_freq)
 
     def prepare_command(self, actuator_id, amplitude, frequency):
         addr = self.actuator_id_to_addr(actuator_id)
-        if frequency <= 100:
-            duty = self.map_amplitude_to_duty(amplitude)
-            freq = 0
-        else:
-            duty = 8
-            freq = self.map_frequency_to_freq_param(frequency)
+        duty = self.map_amplitude_to_duty(amplitude)
+        freq = self.map_frequency_to_freq_param(frequency)
+        
         return (addr, duty, freq, 1)  # 1 for start
 
     def process_commands(self):
@@ -142,8 +308,8 @@ class HapticCommandManager:
             self.prepare_command(
                 actuator_id,
                 signal_details["current_amplitude"],
-                # Safely handle missing "parameters" by checking if it's None
-                signal_details.get("parameters", {}).get('frequency', 100) if signal_details.get("parameters") else 100
+                # Safely handle missing "high_freq" by checking if it exists in current_signals
+                current_signals[actuator_id]["high_freq"][0] if "high_freq" in current_signals[actuator_id] else 100
             )
             for actuator_id, signal_details in current_amplitudes.items()
         ]
@@ -161,10 +327,18 @@ class HapticCommandManager:
                 print(f"  Start Time: {signal_details['start_time']}")
                 print(f"  Stop Time: {signal_details['stop_time']}")
                 print(f"  Full Data Length: {len(signal_details['data'])}")
-                if signal_details.get("parameters"):
-                    print(f"  Frequency: {signal_details['parameters'].get('frequency', 'N/A')} Hz")
+                
+                # Print the frequency from high_freq if available
+                if "high_freq" in signal_details:
+                    print(f"  First High Frequency Value: {signal_details['high_freq'][0]}")
                 else:
-                    print("  No frequency data available")
+                    print("  No High Frequency Data available")
+
+                # Print Low Frequency Data Length
+                if "low_freq" in signal_details:
+                    print(f"  Low Frequency Data Length: {len(signal_details['low_freq'])}")
+                else:
+                    print("  No Low Frequency Data available")
 
         # Combine stop commands and active commands
         all_commands = stop_commands + active_commands
@@ -341,10 +515,13 @@ class DesignSaver:
                 'type': signal["type"],
                 'start_time': signal["start_time"],
                 'stop_time': signal["stop_time"],
-                'data': signal["data"],
+                'data': signal["data"],  # Original signal data
+                'high_freq': signal.get("high_freq", None),  # New high frequency data
+                'low_freq': signal.get("low_freq", None),    # New low frequency data
                 'parameters': signal["parameters"]
             } for signal in timeline_canvas.signals])
         return timeline_data
+
 
     def collect_mpl_canvas_data(self):
         return {
@@ -370,18 +547,23 @@ class DesignSaver:
             if actuator_id not in self.app_reference.actuator_signals:
                 self.app_reference.actuator_signals[actuator_id] = []
             
+            # Load signal data, including high and low frequency components
             self.app_reference.actuator_signals[actuator_id].append({
                 'type': signal_info['type'],
                 'start_time': signal_info['start_time'],
                 'stop_time': signal_info['stop_time'],
-                'data': signal_info['data'],
+                'data': signal_info['data'],  # Original data
+                'high_freq': signal_info.get('high_freq', None),  # High frequency data
+                'low_freq': signal_info.get('low_freq', None),    # Low frequency data
                 'parameters': signal_info['parameters']
             })
 
+        # Apply the signals to the timeline canvases
         for actuator_id, signals in self.app_reference.actuator_signals.items():
             if actuator_id in self.timeline_canvases:
                 self.timeline_canvases[actuator_id].signals = signals
                 self.timeline_canvases[actuator_id].plot_all_signals()
+
                 
 
     def apply_mpl_canvas_data(self, mpl_data):
@@ -2398,6 +2580,8 @@ class TimelineCanvas(FigureCanvas):
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
         self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(color)
+
+        self.segmentation_api = signal_segmentation_api()
         
         # Set spine color and customize appearance
         spine_color = to_rgba((240/255, 235/255, 229/255))
@@ -2598,16 +2782,57 @@ class TimelineCanvas(FigureCanvas):
             if signal_data:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
-                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters=None)
                     else:
-                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters=None)
+
+        # If the signal is not in custom or imported signals, prompt for parameters
         else:
             parameters = self.prompt_signal_parameters(signal_type)
             if parameters is not None:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
                     signal_data = self.generate_signal_data(signal_type, parameters)
+
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
                         self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
                     else:
@@ -2661,16 +2886,18 @@ class TimelineCanvas(FigureCanvas):
 
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
-        # Record the signal data and its parameters into the signals list
-        print("Reached Record Signal")
+        # Record the signal data, including original, high frequency, and low frequency components
+        print("Recorded")
         self.signals.append({
             "type": signal_type,
-            "data": signal_data,
+            "data": signal_data['data'],          # Store the original data as "data"
+            "high_freq": signal_data['high_freq'],  # Store high frequency data
+            "low_freq": signal_data['low_freq'],    # Store low frequency data
             "start_time": start_time,
             "stop_time": stop_time,
             "parameters": parameters
         })
-        print(self.signals)
+
 
     def plot_all_signals(self):
         if not self.signals:
@@ -2684,7 +2911,6 @@ class TimelineCanvas(FigureCanvas):
         # Determine the max stop time across all recorded signals
         max_stop_time = max([signal["stop_time"] for signal in self.signals])
 
-        # dragggg
         # Store the signal duration for use in dragging functionality
         self.signal_duration = max_stop_time
 
@@ -2697,12 +2923,14 @@ class TimelineCanvas(FigureCanvas):
             start_sample = int(signal["start_time"] * TIME_STAMP)
             stop_sample = int(signal["stop_time"] * TIME_STAMP)
             signal_duration = stop_sample - start_sample
+
+            # Use the original signal data for plotting
+            original_signal = signal["data"]
+
             # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            if len(signal["data"]) > 0:
-                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+            if len(original_signal) > 0:
+                signal_data = np.tile(original_signal, int(np.ceil(signal_duration / len(original_signal))))[:signal_duration]
             else:
-                # Handle the case where signal["data"] is empty
-                # You can either skip this signal or generate a default signal.
                 print(f"Warning: signal data is empty for signal {signal['type']}.")
                 signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
 
@@ -2711,6 +2939,7 @@ class TimelineCanvas(FigureCanvas):
         # Generate time array for the x-axis
         t = np.linspace(0, max_stop_time, total_samples)
         self.plot_signal_data(t, combined_signal)
+
 
     def plot_signal_data(self, t, signal_data):
         # Clear the current plot and plot the new signal
@@ -3128,6 +3357,53 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ble_api = python_ble_api()
         self.haptic_manager = HapticCommandManager(self.ble_api)
 
+        self.ui.actionConnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_connect_dialog)
+        self.ui.actionDisconnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_disconnect_dialog)
+
+        self.bluetooth_connected = False
+
+    def show_bluetooth_connect_dialog(self):
+        """Show the Bluetooth connection dialog if no device is currently connected."""
+        if not self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_connection_status)  # Handle connection signal
+            dialog.exec()  # Show the dialog
+        else:
+            # If a device is already connected, show a warning message
+            QtWidgets.QMessageBox.warning(self, "Bluetooth Connection",
+                                        "A Bluetooth device is already connected. Please disconnect the current device first.")
+
+    def show_bluetooth_disconnect_dialog(self):
+        """Show the Bluetooth disconnection confirmation dialog."""
+        if self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_disconnection_status)  # Handle disconnection signal
+            dialog.show_disconnect_confirmation()  # Show the confirmation dialog
+        else:
+            # If no device is connected, show a message
+            QtWidgets.QMessageBox.information(self, "No Device Connected", 
+                                            "There is no Bluetooth device to disconnect.")
+
+
+    
+    def update_bluetooth_connection_status(self, success):
+        """Update the connection status variable based on the connection result."""
+        self.is_bluetooth_connected = success  # Update the connection status
+        if success:
+            self.bluetooth_connected = True
+            print("Connected from Haptics")
+        else:
+            self.bluetooth_connected = False
+            print("Failed from Haptics")
+
+    def update_bluetooth_disconnection_status(self, success):
+        """Update the connection status variable based on the disconnection result."""
+        if success:
+            self.is_bluetooth_connected = False  # Update the connection status
+            self.statusBar().showMessage("Bluetooth device disconnected successfully.")
+        else:
+            self.statusBar().showMessage("Bluetooth disconnection failed.")
+
     def update_pushButton_5_state(self):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
         # Check if any actuator has signals
@@ -3281,6 +3557,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         return super(Haptics_App, self).eventFilter(source, event)
 
     def update_current_amplitudes(self, time_position):
+        # Tracing the low frequency data
+
         self.current_amplitudes.clear()
         current_signals = {}  # New variable to store full signal details for comparison
 
@@ -3289,12 +3567,12 @@ class Haptics_App(QtWidgets.QMainWindow):
                 if signal["start_time"] <= time_position <= signal["stop_time"]:
                     signal_duration = signal["stop_time"] - signal["start_time"]
                     relative_position = (time_position - signal["start_time"]) / signal_duration
-                    index = int(relative_position * len(signal["data"]))
+                    index = int(relative_position * len(signal["low_freq"]))
                     
                     # Ensure index is within bounds
-                    index = max(0, min(index, len(signal["data"]) - 1))
+                    index = max(0, min(index, len(signal["low_freq"]) - 1))
                     
-                    amplitude = signal["data"][index]
+                    amplitude = signal["low_freq"][index]
                     
                     # Update current_amplitudes with only the amplitude and frequency
                     self.current_amplitudes[actuator_id] = {
@@ -3308,6 +3586,8 @@ class Haptics_App(QtWidgets.QMainWindow):
                         "start_time": signal["start_time"],
                         "stop_time": signal["stop_time"],
                         "data": signal["data"],
+                        "high_freq": signal['high_freq'],
+                        "low_freq": signal['low_freq'],
                         "parameters": signal.get("parameters", {})
                     }
 

@@ -191,6 +191,24 @@ class Ui_MainWindow(object):
         self.menubar.addAction(self.menuMenu.menuAction())
         self.menubar.addAction(self.menuCanvas.menuAction())
 
+        # Add menuDevice
+        self.menuDevice = QtWidgets.QMenu(parent=self.menubar)
+        self.menuDevice.setObjectName("menuDevice")
+
+        # Add actions for Bluetooth connection
+        self.actionConnect_Bluetooth_Device = QtGui.QAction(parent=MainWindow)
+        self.actionConnect_Bluetooth_Device.setObjectName("actionConnect_Bluetooth_Device")
+
+        self.actionDisconnect_Bluetooth_Device = QtGui.QAction(parent=MainWindow)
+        self.actionDisconnect_Bluetooth_Device.setObjectName("actionDisconnect_Bluetooth_Device")
+
+        # Add the actions to the menuDevice
+        self.menuDevice.addAction(self.actionConnect_Bluetooth_Device)
+        self.menuDevice.addAction(self.actionDisconnect_Bluetooth_Device)
+
+        # Add menuDevice to the menubar
+        self.menubar.addAction(self.menuDevice.menuAction())
+
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
@@ -211,3 +229,6 @@ class Ui_MainWindow(object):
         self.actionImport_Waveform.setText(_translate("MainWindow", "Import Waveform"))
         self.actionCreate_New_Chain.setText(_translate("MainWindow", "Create New Chain"))
         self.actionAdd_One_Unit.setText(_translate("MainWindow", "Add One Unit"))
+        self.menuDevice.setTitle(_translate("MainWindow", "Device"))
+        self.actionConnect_Bluetooth_Device.setText(_translate("MainWindow", "Connect Bluetooth Device"))
+        self.actionDisconnect_Bluetooth_Device.setText(_translate("MainWindow", "Disconnect Bluetooth Device"))

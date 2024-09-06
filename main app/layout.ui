@@ -426,8 +426,16 @@
     </property>
     <addaction name="actionCreate_New_Chain"/>
    </widget>
+   <widget class="QMenu" name="menuDevice">
+    <property name="title">
+     <string>Device</string>
+    </property>
+    <addaction name="actionConnect_Bluetooth_Device"/>
+    <addaction name="actionDisconnect_Bluetooth_Device"/>
+   </widget>
    <addaction name="menuMenu"/>
    <addaction name="menuCanvas"/>
+   <addaction name="menuDevice"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionStart_New_Design">
@@ -453,6 +461,16 @@
   <action name="actionAdd_One_Unit">
    <property name="text">
     <string>Add One Unit</string>
+   </property>
+  </action>
+  <action name="actionConnect_Bluetooth_Device">
+   <property name="text">
+    <string>Connect Bluetooth Device</string>
+   </property>
+  </action>
+  <action name="actionDisconnect_Bluetooth_Device">
+   <property name="text">
+    <string>Disconnect Bluetooth Device</string>
    </property>
   </action>
  </widget>

@@ -40,9 +40,11 @@ class python_ble_api:
 
     async def get_ble_devices_async(self):
         devices = await BleakScanner.discover()
-        return [d.name for d in devices if d.name != '']
+        print("Device Fetching Done")
+        return [d.name if d.name else f"Unnamed Device ({d.address})" for d in devices]
 
     async def connect_ble_device_async(self, device_name) -> bool:
+        print("entered connection async")
         devices = await BleakScanner.discover()
         for d in devices:
             if d.name == device_name:
@@ -73,6 +75,7 @@ class python_ble_api:
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
     
     def get_ble_devices(self):
+        print("Dvice Fetching Started")
         return self.run_async(self.get_ble_devices_async()).result()
 
     def connect_ble_device(self, device_name):
@@ -90,14 +93,14 @@ if __name__ == '__main__':
     device_names = ble_api.get_ble_devices()
     print(device_names)
     
-    # Example usage with GUI interaction:
-    if 'QT Py ESP32-S3' in device_names:
-        if ble_api.connect_ble_device('QT Py ESP32-S3'):
-            ble_api.send_command(1, 7, 2, 1)
-            time.sleep(3)
+    # # Example usage with GUI interaction:
+    # if 'QT Py ESP32-S3' in device_names:
+    #     if ble_api.connect_ble_device('QT Py ESP32-S3'):
+    #         ble_api.send_command(1, 7, 2, 1)
+    #         time.sleep(3)
 
-            ble_api.send_command(1, 7, 2, 0)
-            time.sleep(3)
+    #         ble_api.send_command(1, 7, 2, 0)
+    #         time.sleep(3)
             
-            ble_api.disconnect_ble_device()
-            time.sleep(3)
+    #         ble_api.disconnect_ble_device()
+    #         time.sleep(3)
