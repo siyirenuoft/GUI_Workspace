@@ -39,6 +39,168 @@ def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
 
+class BluetoothDeviceSearchThread(QtCore.QThread):
+    devices_found = QtCore.pyqtSignal(list)
+
+    def __init__(self, ble_api):
+        super().__init__()
+        self.ble_api = ble_api
+
+    def run(self):
+        # This method will be executed in a separate thread
+        devices = self.ble_api.get_ble_devices()  # Use your BLE API to get device list
+        self.devices_found.emit(devices)  # Emit the devices found signal
+
+class BluetoothConnectThread(QtCore.QThread):
+    connection_result = QtCore.pyqtSignal(bool)
+
+    def __init__(self, ble_api, device_name):
+        super().__init__()
+        self.ble_api = ble_api
+        self.device_name = device_name
+
+    def run(self):
+        success = self.ble_api.connect_ble_device(self.device_name)
+        self.connection_result.emit(success)  # Emit the result (success or failure)
+
+class BluetoothConnectDialog(QtWidgets.QDialog):
+    device_selected_signal = QtCore.pyqtSignal(bool) # This signal is for transmitting both connect and disconnect boolean
+
+    def __init__(self, ble_api, parent=None):
+        super(BluetoothConnectDialog, self).__init__(parent)
+        self.setWindowTitle("Connect to Bluetooth Device")
+        self.ble_api = ble_api
+
+        # Layout for the popup window
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Label for searching status
+        self.status_label = QtWidgets.QLabel("Searching For Devices...", self)
+        layout.addWidget(self.status_label)
+
+        # Create a horizontal layout for the buttons
+        button_layout = QtWidgets.QHBoxLayout()
+
+        # Create a dropdown for available devices
+        self.device_dropdown = QtWidgets.QComboBox(self)
+        layout.addWidget(self.device_dropdown)
+
+        # Create a Search button
+        self.search_button = QtWidgets.QPushButton("Search", self)
+        self.search_button.setEnabled(False)  # Disabled while searching
+        button_layout.addWidget(self.search_button)
+
+        # Create a Connect button
+        self.connect_button = QtWidgets.QPushButton("Connect", self)
+        self.connect_button.setEnabled(False)  # Disabled until devices are found
+        button_layout.addWidget(self.connect_button)
+
+        layout.addLayout(button_layout)
+
+        # Signal-slot connection for the buttons
+        self.connect_button.clicked.connect(self.connect_to_device)
+        self.search_button.clicked.connect(self.start_search)
+
+        # Start the initial search for devices in a background thread
+        self.start_search()
+
+    def start_search(self):
+        """Start searching for devices in the background thread."""
+        self.device_dropdown.clear()  # Clear the dropdown list
+        self.connect_button.setEnabled(False)  # Disable connect button while searching
+        self.status_label.setText("Searching For Devices. Be Right Back...")  # Update status label
+        self.search_button.setEnabled(False)  # Disable search button while searching
+
+        # Start the search in a new background thread
+        self.search_thread = BluetoothDeviceSearchThread(self.ble_api)
+        self.search_thread.devices_found.connect(self.load_devices)
+        self.search_thread.start()
+
+    def load_devices(self, devices):
+        """Load BLE devices into the dropdown list once the search is complete."""
+        if devices:
+            self.device_dropdown.addItems(devices)
+            self.connect_button.setEnabled(True)  # Enable connect button when devices are found
+            self.status_label.setText(f"Found {len(devices)} device(s).")
+        else:
+            self.status_label.setText("No devices found.")
+        self.search_button.setEnabled(True)  # Enable search button after search completes
+
+    def connect_to_device(self):
+        """Attempt to connect to the selected device in a background thread."""
+        selected_device = self.device_dropdown.currentText()
+        if selected_device:
+            # Lock the buttons and show "Connecting to device..."
+            self.connect_button.setEnabled(False)
+            self.search_button.setEnabled(False)
+            self.status_label.setText(f"Connecting to {selected_device}...")
+
+            # Start the connection in a background thread
+            self.connect_thread = BluetoothConnectThread(self.ble_api, selected_device)
+            self.connect_thread.connection_result.connect(self.on_connection_finished)
+            self.connect_thread.start()
+
+    def on_connection_finished(self, success):
+        """Handle the result of the Bluetooth connection attempt."""
+        # Emit the connection result signal
+        self.device_selected_signal.emit(success)
+    
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # Show the connection status
+        QtWidgets.QMessageBox.information(self, "Connection Status",
+                                        f"Connection {'Succeeded' if success else 'Failed'}!")
+
+        # If the connection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if connection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Connection failed. Please try again.")
+
+    def disconnect_from_device(self):
+        """Attempt to disconnect the connected device."""
+        # Lock the buttons and show "Disconnecting from device..."
+        self.connect_button.setEnabled(False)
+        self.search_button.setEnabled(False)
+        self.status_label.setText(f"Disconnecting from {self.device_dropdown.currentText()}...")
+
+        # Attempt to disconnect
+        success = self.ble_api.disconnect_ble_device()
+
+        # Show the disconnection status
+        QtWidgets.QMessageBox.information(self, "Disconnection Status",
+                                        f"Disconnection {'Succeeded' if success else 'Failed'}!")
+
+        # Emit signal for future use
+        self.device_selected_signal.emit(success)
+
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # If the disconnection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if disconnection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Disconnection failed. Please try again.")
+
+    def show_disconnect_confirmation(self):
+        """Show a confirmation dialog before disconnecting."""
+        reply = QtWidgets.QMessageBox.question(self, 'Disconnect Bluetooth Device',
+                                            "Are you sure you want to disconnect?",
+                                            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                                            QtWidgets.QMessageBox.StandardButton.No)
+        
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.disconnect_from_device()  # Call the method to disconnect
+        else:
+            self.status_label.setText("Disconnection cancelled.")
+
+
 class HapticCommandManager:
     def __init__(self, ble_api):
         self.ble_api = ble_api
@@ -46,7 +208,7 @@ class HapticCommandManager:
         self.last_send_time = 0
         self.is_playing = False
         self.CHAIN_JUMP_INDEX = 16
-        self.CMD_SENDING_FREQ = 200  # Hz
+        self.CMD_SENDING_FREQ = 1  # Hz
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
         self.last_sent_addr = None
@@ -2661,6 +2823,53 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         self.ble_api = python_ble_api()
         self.haptic_manager = HapticCommandManager(self.ble_api)
+
+        self.ui.actionConnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_connect_dialog)
+        self.ui.actionDisconnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_disconnect_dialog)
+
+        self.bluetooth_connected = False
+
+    def show_bluetooth_connect_dialog(self):
+        """Show the Bluetooth connection dialog if no device is currently connected."""
+        if not self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_connection_status)  # Handle connection signal
+            dialog.exec()  # Show the dialog
+        else:
+            # If a device is already connected, show a warning message
+            QtWidgets.QMessageBox.warning(self, "Bluetooth Connection",
+                                        "A Bluetooth device is already connected. Please disconnect the current device first.")
+
+    def show_bluetooth_disconnect_dialog(self):
+        """Show the Bluetooth disconnection confirmation dialog."""
+        if self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_disconnection_status)  # Handle disconnection signal
+            dialog.show_disconnect_confirmation()  # Show the confirmation dialog
+        else:
+            # If no device is connected, show a message
+            QtWidgets.QMessageBox.information(self, "No Device Connected", 
+                                            "There is no Bluetooth device to disconnect.")
+
+
+    
+    def update_bluetooth_connection_status(self, success):
+        """Update the connection status variable based on the connection result."""
+        self.is_bluetooth_connected = success  # Update the connection status
+        if success:
+            self.bluetooth_connected = True
+            print("Connected from Haptics")
+        else:
+            self.bluetooth_connected = False
+            print("Failed from Haptics")
+
+    def update_bluetooth_disconnection_status(self, success):
+        """Update the connection status variable based on the disconnection result."""
+        if success:
+            self.is_bluetooth_connected = False  # Update the connection status
+            self.statusBar().showMessage("Bluetooth device disconnected successfully.")
+        else:
+            self.statusBar().showMessage("Bluetooth disconnection failed.")
 
     def update_pushButton_5_state(self):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
