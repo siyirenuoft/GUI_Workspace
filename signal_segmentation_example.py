@@ -85,8 +85,6 @@ plt.xlabel('Time [sec]')
 plt.colorbar(label='Magnitude')
 plt.show()
 
-exit()
-
 
 # Downsample the signal to 200 samples/sec
 downsample_rate = 200
