@@ -201,6 +201,28 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         else:
             self.status_label.setText("Disconnection cancelled.")
 
+class CommandManagerWorker(QThread):
+    command_processed = pyqtSignal()  # Signal emitted when a command is processed
+    
+    def __init__(self, haptic_manager):
+        super().__init__()
+        self.haptic_manager = haptic_manager
+        self.running = False
+        self.current_amplitudes = {}
+        self.current_signals = {}
+
+    def run(self):
+        """ Main loop of the worker thread. This runs until stopped. """
+        self.running = True
+        while self.running:
+            # Call the update and process_commands methods in the loop
+            self.haptic_manager.update(self.current_amplitudes, self.current_signals)
+            self.haptic_manager.process_commands()
+            time.sleep(0.01)  # Control the frequency of execution (optional)
+            
+    def stop(self):
+        """Stop the worker thread."""
+        self.running = False
 
 class HapticCommandManager:
     def __init__(self, ble_api):
@@ -3383,15 +3405,26 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Call this method initially to set the state of pushButton_5
         self.update_pushButton_5_state()
 
-        self.current_amplitudes = {}
+        self.current_amplitudes = {} # Including amplitude and frequency (amplitude)
 
+        # COMMAND MANAGER
         self.ble_api = python_ble_api()
         self.haptic_manager = HapticCommandManager(self.ble_api)
+        # Create Command Manager Worker
+        self.command_manager_worker = CommandManagerWorker(self.haptic_manager)
+        self.command_manager_worker.start()  # Start the worker thread
 
         self.ui.actionConnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_connect_dialog)
         self.ui.actionDisconnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_disconnect_dialog)
 
+        # BLUETOOTH CONNECTION RELATED
         self.bluetooth_connected = False
+
+    def closeEvent(self, event):
+        """ COMMAND MANAGER RELAtED. Ensure the worker thread is stopped when the app is closed. """
+        self.command_manager_worker.stop()
+        self.command_manager_worker.wait()  # Wait for the thread to finish
+        super().closeEvent(event)
 
     def show_bluetooth_connect_dialog(self):
         """Show the Bluetooth connection dialog if no device is currently connected."""
@@ -3470,9 +3503,11 @@ class Haptics_App(QtWidgets.QMainWindow):
         if self.slider_moving:
             self.pause_slider_movement()
             self.haptic_manager.stop_playback()
+            self.command_manager_worker.stop()  # Stop worker when pausing
         else:
             self.start_slider_movement()
             self.haptic_manager.start_playback()
+            self.command_manager_worker.start()  # Restart worker when playing
 
     def start_slider_movement(self):
         """Start moving the slider from its current position to the target position."""
@@ -3546,8 +3581,11 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # To send ending condition if the slider reaches the end.
                 self.haptic_manager.end_of_slider()
         
-        # Pass both current_amplitudes and current_signals to the haptic manager's update
-        self.haptic_manager.update(current_amplitudes, current_signals)
+        # COMMAND MANAGER WORKER RELATED
+        # Pass both current_amplitudes and current_signals to the worker
+        self.command_manager_worker.current_amplitudes = current_amplitudes
+        self.command_manager_worker.current_signals = current_signals
+
 
     def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
