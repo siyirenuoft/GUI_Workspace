@@ -260,15 +260,23 @@ class HapticCommandManager:
         current_time = time.time()
         if current_time - self.last_send_time_dequeue >= self.CMD_SENDING_INTERVAL:
             if self.command_queue and self.is_playing:
-                self.last_sent_commands = list(self.command_queue)  # Store a copy of the current commands
+                commands_to_send = []
                 while self.command_queue:
                     addr, duty, freq, start_stop = self.command_queue.popleft()
-                    self.ble_api.send_command(addr, duty, freq, start_stop)
-                    print(f"Sending command: Time {current_time}, Addr {addr}, Duty {duty}, Freq {freq}, Start/Stop {start_stop}")
-                    self.last_send_time_dequeue = current_time
+                    commands_to_send.append({
+                        "addr": addr,
+                        "duty": duty,
+                        "freq": freq,
+                        "start_or_stop": start_stop
+                    })
                     self.last_sent_addr = addr
-                # Optional: clear the command queue after processing
-                self.command_queue.clear()
+                
+                if commands_to_send:
+                    self.ble_api.send_command_list(commands_to_send)  # send the list of commands
+                    print(f"Sending command list at Time {current_time}: {commands_to_send}")
+                
+                self.last_send_time_dequeue = current_time
+
 
     def start_playback(self):
         self.is_playing = True
@@ -279,22 +287,22 @@ class HapticCommandManager:
         self.is_playing = False
         # Generate stop commands for all active actuators based on the current active signals
         stop_commands = [
-            (self.actuator_id_to_addr(actuator_id), 0, 0, 0) 
+            {"addr": self.actuator_id_to_addr(actuator_id), "duty": 0, "freq": 0, "start_or_stop": 0}
             for actuator_id in self.active_signals.keys()
         ]
-        #print("STOP")
+        
         self.command_queue.clear()
         
         # Send STOP commands to the actuators
-        for cmd in stop_commands:
-            self.ble_api.send_command(*cmd)
+        if stop_commands:
+            self.ble_api.send_command_list(stop_commands)  # Send the list of stop commands
             current_time = time.time()
-            print(f"[Play Button Stopping] Sending command: Time{current_time}, Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
-            time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
-
+            print(f"[Play Button Stopping] Sending stop command list at {current_time}: {stop_commands}")
+        
         # Clear active actuators and active signals after sending the stop commands
         self.active_actuators.clear()
         self.active_signals.clear()
+
 
     def update(self, current_amplitudes, current_signals):
         """Update the playing signals if there is a change."""
