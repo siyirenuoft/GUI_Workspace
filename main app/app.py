@@ -2610,12 +2610,12 @@ class TimelineCanvas(FigureCanvas):
 
     # dragggg
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
+        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 2:
             self._dragging = True
             self._last_mouse_x = event.position().x()
     # dragggg
     def mouseMoveEvent(self, event):
-        if self._dragging and self.signal_duration > 10:
+        if self._dragging and self.signal_duration > 2:
             dx = event.position().x() - self._last_mouse_x
             self._last_mouse_x = event.position().x()
             xmin, xmax = self.axes.get_xlim()
@@ -2959,9 +2959,10 @@ class TimelineCanvas(FigureCanvas):
         # Plot the signal data
         self.axes.plot(t, signal_data, color=spine_color)
 
-        # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 10:
-            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
+        #draggg
+        # Check if the signal is longer than 2 seconds
+        if self.signal_duration > 2:
+            self.axes.set_xlim(0, 2)  # Show only the first 2 seconds initially
             
             # Adjust arrow size and location using mutation_scale
             arrow_props = dict(facecolor='gray', edgecolor='none', alpha=0.6, mutation_scale=50)
