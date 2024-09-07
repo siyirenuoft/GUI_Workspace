@@ -2616,12 +2616,12 @@ class TimelineCanvas(FigureCanvas):
 
     # dragggg
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
+        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 2:
             self._dragging = True
             self._last_mouse_x = event.position().x()
     # dragggg
     def mouseMoveEvent(self, event):
-        if self._dragging and self.signal_duration > 10:
+        if self._dragging and self.signal_duration > 2:
             dx = event.position().x() - self._last_mouse_x
             self._last_mouse_x = event.position().x()
             xmin, xmax = self.axes.get_xlim()
@@ -2990,9 +2990,10 @@ class TimelineCanvas(FigureCanvas):
         # Plot the signal data
         self.axes.plot(t, signal_data, color=spine_color)
 
+        #draggg
         # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 10:
-            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
+        if self.signal_duration > 2:
+            self.axes.set_xlim(0, 2)  # Show only the first 10 seconds initially
             
             # Adjust arrow size and location using mutation_scale
             arrow_props = dict(facecolor='gray', edgecolor='none', alpha=0.6, mutation_scale=50)
@@ -3661,7 +3662,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         return self.current_amplitudes, current_signals
 
     def update_actuator_text(self):
-        
         # Find the global largest stop time across all actuators
         all_stop_times = []
         for signals in self.actuator_signals.values():
@@ -3672,14 +3672,18 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             global_total_time = 1  # Avoid division by zero in the width calculation
 
+        # Define the 3 cm left offset and 1 cm right offset in pixels
+        dpi = self.logicalDpiX()  # Get the screen DPI
+        left_offset = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+        right_offset = (3 / 2.54) * dpi  # Convert 1 cm to pixels
+
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
 
                 # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
-                # Assuming the first widget in the layout is the actuator label (ID and type)
-                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
+                for i in reversed(range(1, actuator_widget.layout().count())):
                     item = actuator_widget.layout().takeAt(i)
                     widget = item.widget()
                     if widget:
@@ -3696,18 +3700,18 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Ensure the ID/Type label stays in the first position
                 if actuator_label.parent() is None:
-                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
+                    actuator_widget.layout().insertWidget(0, actuator_label)
 
                 # Create a container for the timeline and signal widgets
                 timeline_container = QtWidgets.QWidget(actuator_widget)
                 timeline_container.setStyleSheet("background-color: transparent;")
-                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
+                timeline_container.setFixedHeight(30)
                 timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
                 timeline_layout.setContentsMargins(0, 0, 0, 0)
                 timeline_layout.setSpacing(0)
 
-                # Calculate the width of the actuator widget based on the global total time
-                widget_width = actuator_widget.size().width()
+                # Calculate the available width of the actuator widget after applying the offsets
+                widget_width = actuator_widget.size().width() - left_offset - right_offset  # Subtract both offsets
 
                 # Track the last stop time to insert gaps
                 last_stop_time = 0
@@ -3723,7 +3727,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                     # Calculate the relative starting position of the signal widget
                     signal_start_ratio = signal["start_time"] / global_total_time
-                    signal_start_position = int(signal_start_ratio * widget_width)
+                    signal_start_position = int(signal_start_ratio * widget_width) + left_offset  # Add the 3 cm offset
 
                     # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
                     if signal["start_time"] > last_stop_time:
@@ -3758,10 +3762,12 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
+                timeline_container.updateGeometry()
 
         # After adding all timeline widgets, ensure the slider layer stays on top
         self.raise_slider_layer()
-                
+
+                  
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
         if actuator:
