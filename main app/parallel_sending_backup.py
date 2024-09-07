@@ -1,3 +1,12 @@
+"""
+The allowing parallel BLE sending data because when multiple signals to be fired at the same time, the command are being sent simultaneously
+Not the stopping condition. 
+
+You can start working on it with ease.
+
+Sept7 1:33AM Connor
+"""
+
 import sys
 import os
 import queue

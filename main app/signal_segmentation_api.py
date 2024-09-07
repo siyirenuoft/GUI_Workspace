@@ -21,39 +21,97 @@ class signal_segmentation_api:
         low_freq_signal: a numpy array of the low frequency components (range [0, 1]), used for setting the intensity of vibration commands (map to [0, 15])
     '''
 
-    def signal_segmentation(self, product_signal, sampling_rate, downsample_rate):
-        # Perform STFT on the signal to get the high frequency components
-        frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=int(sampling_rate))
+    # def signal_segmentation(self, product_signal, sampling_rate, downsample_rate, threshold=110):
+    #     """For test only, a constant of 0.5 for low and a decending from 500 to 0 for high"""
+    #     # Generate a constant 0.5 for the low frequency signal
+    #     low_freq_signal = np.full_like(product_signal, 0.5)
         
-        # Find the dominant frequency over all segments
+    #     # Generate a descending signal from 500 to 0 for the high frequency signal
+    #     high_freq_signal = np.linspace(500, 0, len(product_signal))
+
+    #     # Ensure the return types are NumPy arrays
+    #     high_freq_signal = np.array(high_freq_signal)
+    #     low_freq_signal = np.array(low_freq_signal)
+
+    #     return high_freq_signal, low_freq_signal
+
+
+    def signal_segmentation(self, product_signal, sampling_rate, downsample_rate, threshold=102):
+        # Perform STFT on the signal to get the high-frequency components
+        frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=2*int(sampling_rate/downsample_rate))
         max_freq = np.argmax(np.abs(Zxx), axis=0)
-        dominant_frequency = np.median(frequencies[max_freq])  # Use median for stability
-        
-        # Check if the dominant frequency is below the threshold (100 Hz)
-        if dominant_frequency < 100:
-            high_freq_signal = np.zeros(len(times))  # Set high frequency signal to zero
-            low_freq_signal = np.abs(np.array(product_signal))  # Leave the low-frequency signal as the original
+        high_freq_signal = frequencies[max_freq][:-1]
+
+        # Perform Hilbert transform on the signal to get the low-frequency components
+        analytic_signal = hilbert(product_signal)
+        amplitude_envelope = np.abs(analytic_signal)
+
+        # Perform FFT on the envelope to get frequency components
+        fft_envelope = fft(amplitude_envelope)
+        fft_freq_env = fftfreq(len(fft_envelope), 1 / sampling_rate)
+
+        # Use median frequency instead of max to compare with the threshold
+        median_frequency = np.median(high_freq_signal)
+        if median_frequency < threshold:
+            # Set low frequency signal to the original and high frequency to zeros
+            low_freq_signal = product_signal
+            high_freq_signal = np.zeros_like(product_signal)
         else:
-            # Perform Hilbert transform on the signal to get the low-frequency components
-            high_freq_signal = np.full(len(times), dominant_frequency)  # Set constant frequency if above threshold
-            
-            analytic_signal = hilbert(product_signal)
-            amplitude_envelope = np.abs(analytic_signal)
-            
-            # Perform FFT on the envelope to get frequency components
-            fft_envelope = fft(amplitude_envelope)
-            fft_freq_env = fftfreq(len(fft_envelope), 1 / sampling_rate)
-            
-            # Filter out frequency components above 100 Hz and ifft back to time domain
+            # Filter out frequency components above downsample_rate/2 and IFFT back to time domain
             fft_envelope_filtered = fft_envelope.copy()
-            fft_envelope_filtered[(fft_freq_env > 100)] = 0
-            fft_envelope_filtered[(fft_freq_env < -100)] = 0
+            fft_envelope_filtered[(fft_freq_env > downsample_rate//2)] = 0
+            fft_envelope_filtered[(fft_freq_env < -downsample_rate//2)] = 0
             filtered_signal = np.real(np.fft.ifft(fft_envelope_filtered))
-            
-            # Processed low-frequency signal
-            low_freq_signal = filtered_signal
+
+            # Clamp the low frequency signal between 0 and 1
+            low_freq_signal = np.clip(filtered_signal, 0, 1)
+
+            # Upsample both signals to match the original signal length using cubic interpolation
+            high_freq_signal = np.interp(np.arange(len(product_signal)), np.linspace(0, len(product_signal)-1, len(high_freq_signal)), high_freq_signal)
+            low_freq_signal = np.interp(np.arange(len(product_signal)), np.linspace(0, len(product_signal)-1, len(low_freq_signal)), low_freq_signal)
+
+        # Ensure the return types are NumPy arrays
+        high_freq_signal = np.array(high_freq_signal)
+        low_freq_signal = np.array(low_freq_signal)
 
         return high_freq_signal, low_freq_signal
+
+
+
+    # def signal_segmentation(self, product_signal, sampling_rate, downsample_rate):
+    #     """Purely No Downsample Version"""
+    #     # Perform STFT on the signal to get the high frequency components
+    #     frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=int(sampling_rate))
+        
+    #     # Find the dominant frequency over all segments
+    #     max_freq = np.argmax(np.abs(Zxx), axis=0)
+    #     dominant_frequency = np.median(frequencies[max_freq])  # Use median for stability
+        
+    #     # Check if the dominant frequency is below the threshold (100 Hz)
+    #     if dominant_frequency < 100:
+    #         high_freq_signal = np.zeros(len(times))  # Set high frequency signal to zero
+    #         low_freq_signal = np.abs(np.array(product_signal))  # Leave the low-frequency signal as the original
+    #     else:
+    #         # Perform Hilbert transform on the signal to get the low-frequency components
+    #         high_freq_signal = np.full(len(times), dominant_frequency)  # Set constant frequency if above threshold
+            
+    #         analytic_signal = hilbert(product_signal)
+    #         amplitude_envelope = np.abs(analytic_signal)
+            
+    #         # Perform FFT on the envelope to get frequency components
+    #         fft_envelope = fft(amplitude_envelope)
+    #         fft_freq_env = fftfreq(len(fft_envelope), 1 / sampling_rate)
+            
+    #         # Filter out frequency components above 100 Hz and ifft back to time domain
+    #         fft_envelope_filtered = fft_envelope.copy()
+    #         fft_envelope_filtered[(fft_freq_env > 100)] = 0
+    #         fft_envelope_filtered[(fft_freq_env < -100)] = 0
+    #         filtered_signal = np.real(np.fft.ifft(fft_envelope_filtered))
+            
+    #         # Processed low-frequency signal
+    #         low_freq_signal = filtered_signal
+
+    #     return high_freq_signal, low_freq_signal
 
 
     # def signal_segmentation(self, product_signal, sampling_rate, downsample_rate):
