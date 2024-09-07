@@ -206,10 +206,11 @@ class HapticCommandManager:
     def __init__(self, ble_api):
         self.ble_api = ble_api
         self.command_queue = deque(maxlen=None)  
-        self.last_send_time = 0
+        self.last_send_time_queue = 0
+        self.last_send_time_dequeue = 0
         self.is_playing = False
         self.CHAIN_JUMP_INDEX = 16
-        self.CMD_SENDING_FREQ = 1  # Hz
+        self.CMD_SENDING_FREQ = 200  # Hz
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
         self.last_sent_addr = None
@@ -257,14 +258,14 @@ class HapticCommandManager:
 
     def process_commands(self):
         current_time = time.time()
-        if current_time - self.last_send_time >= self.CMD_SENDING_INTERVAL:
+        if current_time - self.last_send_time_dequeue >= self.CMD_SENDING_INTERVAL:
             if self.command_queue and self.is_playing:
                 self.last_sent_commands = list(self.command_queue)  # Store a copy of the current commands
                 while self.command_queue:
                     addr, duty, freq, start_stop = self.command_queue.popleft()
                     self.ble_api.send_command(addr, duty, freq, start_stop)
-                    print(f"Sending command: Addr {addr}, Duty {duty}, Freq {freq}, Start/Stop {start_stop}")
-                    self.last_send_time = current_time
+                    print(f"Sending command: Time {current_time}, Addr {addr}, Duty {duty}, Freq {freq}, Start/Stop {start_stop}")
+                    self.last_send_time_dequeue = current_time
                     self.last_sent_addr = addr
                 # Optional: clear the command queue after processing
                 self.command_queue.clear()
@@ -287,18 +288,17 @@ class HapticCommandManager:
         # Send STOP commands to the actuators
         for cmd in stop_commands:
             self.ble_api.send_command(*cmd)
-            print(f"[Play Button Stopping] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
+            current_time = time.time()
+            print(f"[Play Button Stopping] Sending command: Time{current_time}, Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
             time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
 
         # Clear active actuators and active signals after sending the stop commands
         self.active_actuators.clear()
         self.active_signals.clear()
 
-
     def update(self, current_amplitudes, current_signals):
         """Update the playing signals if there is a change."""
-        if not self.is_playing:
-            return
+        current_time = time.time()
 
         # Detect leaving edges and generate stop commands
         stop_commands = self.detect_leaving_edges(current_amplitudes)
@@ -308,8 +308,7 @@ class HapticCommandManager:
             self.prepare_command(
                 actuator_id,
                 signal_details["current_amplitude"],
-                # Safely handle missing "high_freq" by checking if it exists in current_signals
-                current_signals[actuator_id]["high_freq"][0] if "high_freq" in current_signals[actuator_id] else 100
+                signal_details["current_frequency"]
             )
             for actuator_id, signal_details in current_amplitudes.items()
         ]
@@ -320,6 +319,7 @@ class HapticCommandManager:
             self.active_signals = current_signals.copy()
 
             # Log the current signals
+            current_time = time.time()
             print("New signals detected or first update. Updating...")
             for actuator_id, signal_details in current_signals.items():
                 print(f"Actuator ID: {actuator_id}")
@@ -328,30 +328,36 @@ class HapticCommandManager:
                 print(f"  Stop Time: {signal_details['stop_time']}")
                 print(f"  Full Data Length: {len(signal_details['data'])}")
                 
+                
+                # Print the frequency from high_freq if available
+
                 # Print the frequency from high_freq if available
                 if "high_freq" in signal_details:
                     print(f"  First High Frequency Value: {signal_details['high_freq'][0]}")
                 else:
                     print("  No High Frequency Data available")
 
-                # Print Low Frequency Data Length
                 if "low_freq" in signal_details:
                     print(f"  Low Frequency Data Length: {len(signal_details['low_freq'])}")
                 else:
                     print("  No Low Frequency Data available")
 
-        # Combine stop commands and active commands
-        all_commands = stop_commands + active_commands
+        # Time-guarded queueing logic
+        if current_time - self.last_send_time_queue >= self.CMD_SENDING_INTERVAL:
+            # Combine stop commands and active commands
+            all_commands = stop_commands + active_commands
 
-        # Sort commands to prioritize addresses that haven't been sent recently
-        all_commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
+            # Sort commands to prioritize addresses that haven't been sent recently
+            all_commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
 
-        # Add all commands to the queue
-        self.command_queue.extend(all_commands)
+            # Add all commands to the queue
+            self.command_queue.extend(all_commands)
 
-        # Process the commands
+            # Update the last send time after queueing the commands
+            self.last_send_time_queue = current_time
+
+        # Process the commands (not time-guarded)
         self.process_commands()
-
 
     def end_of_slider(self):
         self.is_playing = False
@@ -2672,6 +2678,8 @@ class TimelineCanvas(FigureCanvas):
                     signal_part = {
                         "type": signal["type"],
                         "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -2681,12 +2689,16 @@ class TimelineCanvas(FigureCanvas):
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
                     signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["high_freq"] = signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["low_freq"] = signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
                     adjusted_signals.append(signal)
 
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
                 signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["high_freq"] = signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["low_freq"] = signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
                 adjusted_signals.append(signal)
 
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
@@ -2700,13 +2712,16 @@ class TimelineCanvas(FigureCanvas):
         # Add the new signal as well
         adjusted_signals.append({
             "type": new_signal_type,
-            "data": new_signal_data,
+            "data": new_signal_data["data"],
+            "high_freq": new_signal_data["high_freq"],
+            "low_freq": new_signal_data["low_freq"],
             "start_time": new_start_time,
             "stop_time": new_stop_time,
             "parameters": new_signal_parameters
         })
 
-        print(adjusted_signals)
+        # print(adjusted_signals)
+        #print("LOL")
 
         self.signals = adjusted_signals
         self.plot_all_signals()  # Update the plot with the modified signals
@@ -2722,6 +2737,8 @@ class TimelineCanvas(FigureCanvas):
                     signal_part = {
                         "type": signal["type"],
                         "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -2731,17 +2748,23 @@ class TimelineCanvas(FigureCanvas):
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
                     signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["high_freq"] = signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["low_freq"] = signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
                     adjusted_signals.append(signal)
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
                 signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["high_freq"] = signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["low_freq"] = signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
                 adjusted_signals.append(signal)
             elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
                 # Case: The new signal completely overlaps this signal
                 signal_part1 = {
                     "type": signal["type"],
                     "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                    "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                    "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                     "start_time": signal["start_time"],
                     "stop_time": new_start_time,
                     "parameters": signal["parameters"]
@@ -2749,6 +2772,8 @@ class TimelineCanvas(FigureCanvas):
                 signal_part2 = {
                     "type": signal["type"],
                     "data": signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
+                    "high_freq": signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
+                    "low_freq": signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
                     "start_time": new_stop_time,
                     "stop_time": signal["stop_time"],
                     "parameters": signal["parameters"]
@@ -2784,7 +2809,7 @@ class TimelineCanvas(FigureCanvas):
                 if start_time is not None and stop_time is not None and stop_time > start_time:
                     # Perform segmentation to get high and low frequency components
                     high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
-                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
                     )
 
                     # Keep the original structure with "data" and add the new frequency components
@@ -2816,7 +2841,7 @@ class TimelineCanvas(FigureCanvas):
 
                     # Perform segmentation to get high and low frequency components
                     high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
-                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=TIME_STAMP
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
                     )
 
                     # Keep the original structure with "data" and add the new frequency components
@@ -2886,6 +2911,7 @@ class TimelineCanvas(FigureCanvas):
 
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
+        """Record the signal to the timelinecanvas. In there the signal_data is unpacked to "data", "high_freq", and "low_freq" """
         # Record the signal data, including original, high frequency, and low frequency components
         print("Recorded")
         self.signals.append({
@@ -2898,8 +2924,10 @@ class TimelineCanvas(FigureCanvas):
             "parameters": parameters
         })
 
-
     def plot_all_signals(self):
+        # Set a variable to control which signal component to plot
+        component_to_plot = 'low_freq'  # Options: 'data', 'high_freq', 'low_freq'
+
         if not self.signals:
             # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
             default_duration = 10  # seconds
@@ -2918,22 +2946,25 @@ class TimelineCanvas(FigureCanvas):
         total_samples = int(max_stop_time * TIME_STAMP)
         combined_signal = np.zeros(total_samples)
 
-        # Fill in the combined signal with each recorded signal's data
+        # Fill in the combined signal with each recorded signal's selected data component
         for signal in self.signals:
             start_sample = int(signal["start_time"] * TIME_STAMP)
             stop_sample = int(signal["stop_time"] * TIME_STAMP)
             signal_duration = stop_sample - start_sample
 
-            # Use the original signal data for plotting
-            original_signal = signal["data"]
+            # Use only the selected component (data, high_freq, low_freq)
+            if component_to_plot in signal and len(signal[component_to_plot]) > 0:
+                # Adjust the signal data to fit the required duration (stretch or truncate as needed)
+                signal_data = np.tile(signal[component_to_plot], int(np.ceil(signal_duration / len(signal[component_to_plot]))))[:signal_duration]
 
-            # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            if len(original_signal) > 0:
-                signal_data = np.tile(original_signal, int(np.ceil(signal_duration / len(original_signal))))[:signal_duration]
+                # If the adjusted signal_data is still too short, pad it with zeros
+                if len(signal_data) < signal_duration:
+                    signal_data = np.pad(signal_data, (0, signal_duration - len(signal_data)), 'constant')
             else:
-                print(f"Warning: signal data is empty for signal {signal['type']}.")
+                # Handle the case where the selected component is empty or not available
                 signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
 
+            # Perform the assignment to the combined signal
             combined_signal[start_sample:stop_sample] = signal_data
 
         # Generate time array for the x-axis
@@ -3095,7 +3126,7 @@ class CanvasSizeDialog(QDialog):
         button = QPushButton("OK")
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
-
+        
 class FloatingVerticalSlider(QSlider):
     def __init__(self, parent=None, app_reference=None):
         super().__init__(Qt.Orientation.Vertical, parent)
@@ -3121,30 +3152,14 @@ class FloatingVerticalSlider(QSlider):
         self.slider_start_pos = None
         self.slider_movable = True  # Add a flag to control movement
 
-        # Calculate the minimum and maximum x positions (3 cm from the left edge and 1 cm from the right edge)
+        # Calculate the minimum x position (3 cm from the left edge)
         dpi = self.logicalDpiX()  # Get the screen DPI
-        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (3 / 2.54) * dpi  # 1 cm in pixels
+        self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+
         self.global_total_time = None
 
         # Store the initial vertical position to lock it
         self.initial_y = self.y()
-
-    def update_movable_range(self):
-        """Recalculate the slider's movable range based on the window size."""
-        dpi = self.logicalDpiX()
-        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-
-        # Ensure slider is within new bounds after resizing
-        max_x = int(self.parent().width() - self.width() - self.right_offset)  # Cast to int
-        min_x = int(self.left_offset)  # Cast to int
-
-        current_x = self.x()
-        new_x = max(min_x, min(current_x, max_x))
-        
-        # Reposition slider based on new boundaries, cast to int
-        self.move(int(new_x), int(self.y()))  # Ensure both x and y positions are integers
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -3167,27 +3182,28 @@ class FloatingVerticalSlider(QSlider):
             delta_x = event.globalPosition().x() - self.slider_start_pos.x()
             self.slider_start_pos = event.globalPosition().toPoint()
 
-            new_x = int(self.x() + delta_x)  # Cast to int to ensure it's an integer
-            max_x = int(self.parent().width() - self.width() - self.right_offset)  # Cast to int
-            min_x = int(self.left_offset)  # Cast to int
+            new_x = int(self.x() + delta_x)
+            max_x = self.parent().width() - self.width()
 
-            new_x = max(min_x, min(new_x, max_x))  # Ensure the slider is between 3 cm and 1 cm from edges
+            new_x = max(new_x, int(self.cm_to_pixels))
 
-            self.move(int(new_x), self.y())  # Cast new_x to int before passing to move()
+            if new_x > max_x:
+                new_x = max_x
+
+            self.move(new_x, self.y())
 
             self.update_actuator_highlight(new_x)
-
+            
             total_time = self.app_reference.calculate_total_time()
             if total_time > 0:
-                time_position = total_time * (new_x - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
+                time_position = total_time * (new_x - self.cm_to_pixels) / (self.parent().width() - self.cm_to_pixels)
                 self.app_reference.update_current_amplitudes(time_position)
 
         super().mouseMoveEvent(event)
 
     def update_actuator_highlight(self, slider_position):
-        # Adjust for left and right offsets
-        adjusted_width = self.parent().width() - self.left_offset - self.right_offset
-        new_pos = slider_position - self.left_offset
+        adjusted_width = self.parent().width() - self.cm_to_pixels
+        new_pos = slider_position - self.cm_to_pixels
         
         total_time = self.app_reference.calculate_total_time()
         if total_time > 0:
@@ -3195,7 +3211,7 @@ class FloatingVerticalSlider(QSlider):
             self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
             self.app_reference.update_current_amplitudes(time_position)
         else:
-            print("Warning: No signals found or invalid total time.")   
+            print("Warning: No signals found or invalid total time.")
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -3399,8 +3415,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "No Device Connected", 
                                             "There is no Bluetooth device to disconnect.")
 
-
-    
     def update_bluetooth_connection_status(self, success):
         """Update the connection status variable based on the connection result."""
         self.is_bluetooth_connected = success  # Update the connection status
@@ -3438,27 +3452,18 @@ class Haptics_App(QtWidgets.QMainWindow):
             initial_position = int(cm_to_pixels)  # 3 cm in pixels
             self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
             self.floating_slider.set_slider_movable(False)  # Disable slider movement
-    
-    def calculate_total_time(self):
+
+    def update_slider_target_position(self):
+        """Update the target position for the slider based on the maximum stop time."""
+        # Find the maximum stop time across all actuators
         max_stop_time = max(
             (signal["stop_time"] for signals in self.actuator_signals.values() for signal in signals),
             default=0
         )
-        return max_stop_time
-    
 
-    def update_slider_target_position(self):
-        """Update the target position for the slider based on the maximum stop time."""
-        max_stop_time = self.calculate_total_time()
-
-        # Calculate the target position in pixels based on the max stop time and total time
-        if max_stop_time and self.total_time:
-            dpi = self.logicalDpiX()
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-            adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
-
-            # Calculate the target position based on the time ratio
-            self.slider_target_pos = int(adjusted_width * (max_stop_time / self.total_time) + cm_to_pixels)
+        # Calculate the target position of the slider based on the maximum stop time
+        if (max_stop_time != None) and (self.total_time != None):
+            self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() * (max_stop_time / self.total_time))
 
     def toggle_slider_movement(self):
         """Toggle slider movement and switch button icons."""
@@ -3470,23 +3475,21 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.haptic_manager.start_playback()
 
     def start_slider_movement(self):
-        """Start moving the slider based on the signal's total time."""
+        """Start moving the slider from its current position to the target position."""
+        # Do not reset the position; just start moving from the current position
         current_position = self.floating_slider.x()
+    
+        # Ensure the slider starts moving towards the target position
+        if current_position == self.slider_target_pos:
+            dpi = self.logicalDpiX()  # Get the screen DPI
+            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            initial_position = int(cm_to_pixels)  # 3 cm in pixels
+            self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
 
-        # Set the target position based on time
-        dpi = self.logicalDpiX()
-        cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-        self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width() - cm_to_pixels)
-
-        # Ensure the slider doesn't move backward
-        if current_position >= self.slider_target_pos:
-            # Reset to the initial position
-            self.floating_slider.move(int(cm_to_pixels), self.floating_slider.y())
-
+        self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
         self.slider_moving = True
-        self.slider_timer.start(10)  # The time interval is now just for incremental updates
-        self.pushButton_5.setIcon(self.pause_icon)
-
+        self.slider_timer.start(10)
+        self.pushButton_5.setIcon(self.pause_icon)  # Switch to Pause icon
 
     def pause_slider_movement(self):
         """Pause the slider movement."""
@@ -3501,37 +3504,30 @@ class Haptics_App(QtWidgets.QMainWindow):
         return max(all_stop_times) if all_stop_times else 0
 
     def move_slider(self):
-        """Move the slider incrementally based on the signal's total time."""
+        """Move the slider incrementally towards the target position."""
         if self.slider_moving:
-            # Calculate the width of the movable area for the slider
+            current_pos = self.floating_slider.x()
+            new_pos = min(current_pos + self.slider_step, self.slider_target_pos)
+
+            # Move the slider to the new position
+            self.floating_slider.move(new_pos, self.floating_slider.y())
+
+            # Calculate the 3 cm in pixels
             dpi = self.logicalDpiX()
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-            adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
-            
-            # Calculate the total time of all signals
+            cm_to_pixels = (3 / 2.54) * dpi
+
+            # Adjust the width by subtracting 3 cm
+            adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
+            adjusted_new_pos = new_pos - cm_to_pixels
+
             total_time = self.calculate_total_time()
-
-            # Ensure total_time is valid
             if total_time > 0:
-                # Calculate the current time based on the slider's position
-                current_pos = self.floating_slider.x() - cm_to_pixels
-                time_position = (current_pos / adjusted_width) * total_time
+                time_position = (adjusted_new_pos / adjusted_width) * total_time
 
-                # Calculate the time increment step
-                time_step = (self.slider_step / adjusted_width) * total_time
+                # Capture both current_amplitudes and current_signals from update_current_amplitudes
+                current_amplitudes, current_signals = self.update_current_amplitudes(time_position)
                 
-                # Increment the time position
-                new_time_position = time_position + time_step
-                
-                # Calculate the new slider position based on the new time position
-                new_pos = (new_time_position / total_time) * adjusted_width + cm_to_pixels
-
-                # Move the slider to the new position
-                self.floating_slider.move(int(new_pos), self.floating_slider.y())
-                
-                # Highlight actuators and update signals based on the new time position
-                current_amplitudes, current_signals = self.update_current_amplitudes(new_time_position)
-                self.actuator_canvas.highlight_actuators_at_time(new_time_position)
+                self.actuator_canvas.highlight_actuators_at_time(time_position)
             else:
                 print("Warning: No signals found or invalid total time.")
                 self.slider_timer.stop()
@@ -3539,15 +3535,19 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.pushButton_5.setIcon(self.run_icon)
                 return
 
-            # Stop the slider when it reaches the target position
-            if new_time_position >= total_time:
+            # Check if the slider has reached or exceeded the target position
+            if new_pos >= self.slider_target_pos:
+                # Stop the timer and set the slider_moving to False
                 self.slider_timer.stop()
                 self.slider_moving = False
+                # Change the button icon to the run icon
                 self.pushButton_5.setIcon(self.run_icon)
+                
+                # To send ending condition if the slider reaches the end.
                 self.haptic_manager.end_of_slider()
-
-            # Update the haptic manager with the new signal information
-            self.haptic_manager.update(current_amplitudes, current_signals)
+        
+        # Pass both current_amplitudes and current_signals to the haptic manager's update
+        self.haptic_manager.update(current_amplitudes, current_signals)
 
     def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
@@ -3559,7 +3559,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add a vertical slider to float over the timeline layout
         self.floating_slider = FloatingVerticalSlider(self.slider_layer, app_reference=self)
         self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
-        self.floating_slider.update_movable_range()
 
         # Set the initial position 3 cm away from the left edge
         dpi = self.logicalDpiX()  # Get the screen DPI
@@ -3603,10 +3602,12 @@ class Haptics_App(QtWidgets.QMainWindow):
                     index = max(0, min(index, len(signal["low_freq"]) - 1))
                     
                     amplitude = signal["low_freq"][index]
+                    frequency = signal["high_freq"][index]
                     
                     # Update current_amplitudes with only the amplitude and frequency
                     self.current_amplitudes[actuator_id] = {
                         "current_amplitude": amplitude,
+                        "current_frequency": frequency,
                         "parameters": signal.get("parameters", {})
                     }
 
@@ -3625,21 +3626,9 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Return both the current_amplitudes and current_signals
         return self.current_amplitudes, current_signals
-    
-    def resizeEvent(self, event):
-        # This code runs whenever the window or widget is resized
-        print("Window resized!")
-
-        # Ensure the slider's movable range is updated
-        self.floating_slider.update_movable_range()
-        # Call a function to update the layout based on new window size
-        self.update_actuator_text()
-
-        # Call the superclass' resizeEvent to ensure default behavior is preserved
-        super().resizeEvent(event)
-
 
     def update_actuator_text(self):
+        
         # Find the global largest stop time across all actuators
         all_stop_times = []
         for signals in self.actuator_signals.values():
@@ -3650,18 +3639,14 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             global_total_time = 1  # Avoid division by zero in the width calculation
 
-        # Define the 3 cm left offset and 1 cm right offset in pixels
-        dpi = self.logicalDpiX()  # Get the screen DPI
-        left_offset = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-        right_offset = (3 / 2.54) * dpi  # Convert 1 cm to pixels
-
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
 
                 # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
-                for i in reversed(range(1, actuator_widget.layout().count())):
+                # Assuming the first widget in the layout is the actuator label (ID and type)
+                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
                     item = actuator_widget.layout().takeAt(i)
                     widget = item.widget()
                     if widget:
@@ -3678,18 +3663,18 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Ensure the ID/Type label stays in the first position
                 if actuator_label.parent() is None:
-                    actuator_widget.layout().insertWidget(0, actuator_label)
+                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
 
                 # Create a container for the timeline and signal widgets
                 timeline_container = QtWidgets.QWidget(actuator_widget)
                 timeline_container.setStyleSheet("background-color: transparent;")
-                timeline_container.setFixedHeight(30)
+                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
                 timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
                 timeline_layout.setContentsMargins(0, 0, 0, 0)
                 timeline_layout.setSpacing(0)
 
-                # Calculate the available width of the actuator widget after applying the offsets
-                widget_width = actuator_widget.size().width() - left_offset - right_offset  # Subtract both offsets
+                # Calculate the width of the actuator widget based on the global total time
+                widget_width = actuator_widget.size().width()
 
                 # Track the last stop time to insert gaps
                 last_stop_time = 0
@@ -3705,7 +3690,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                     # Calculate the relative starting position of the signal widget
                     signal_start_ratio = signal["start_time"] / global_total_time
-                    signal_start_position = int(signal_start_ratio * widget_width) + left_offset  # Add the 3 cm offset
+                    signal_start_position = int(signal_start_ratio * widget_width)
 
                     # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
                     if signal["start_time"] > last_stop_time:
@@ -3740,11 +3725,9 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
-                timeline_container.updateGeometry()
 
         # After adding all timeline widgets, ensure the slider layer stays on top
         self.raise_slider_layer()
-
                 
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
