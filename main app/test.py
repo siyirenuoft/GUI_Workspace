@@ -19,98 +19,364 @@ matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 import json
 import pickle
+import csv
 from scipy import signal
-
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
 from PyQt6.QtCore import Qt, pyqtSlot, QPoint
 from PyQt6.QtGui import QPen, QColor, QBrush, QFont
 from PyQt6.QtCore import pyqtSignal
 
+from python_ble_api import python_ble_api
+import math
 import time
 from collections import deque
-import math
-import python_ble_api
+
+from signal_segmentation_api import signal_segmentation_api
+
+TIME_STAMP = 44100
 
 def to_subscript(text):
     subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
     return text.translate(subscript_map)
 
+class BluetoothDeviceSearchThread(QtCore.QThread):
+    devices_found = QtCore.pyqtSignal(list)
+
+    def __init__(self, ble_api):
+        super().__init__()
+        self.ble_api = ble_api
+
+    def run(self):
+        # This method will be executed in a separate thread
+        devices = self.ble_api.get_ble_devices()  # Use your BLE API to get device list
+        self.devices_found.emit(devices)  # Emit the devices found signal
+
+class BluetoothConnectThread(QtCore.QThread):
+    connection_result = QtCore.pyqtSignal(bool)
+
+    def __init__(self, ble_api, device_name):
+        super().__init__()
+        self.ble_api = ble_api
+        self.device_name = device_name
+
+    def run(self):
+        success = self.ble_api.connect_ble_device(self.device_name)
+        self.connection_result.emit(success)  # Emit the result (success or failure)
+
+class BluetoothConnectDialog(QtWidgets.QDialog):
+    device_selected_signal = QtCore.pyqtSignal(bool) # This signal is for transmitting both connect and disconnect boolean
+
+    def __init__(self, ble_api, parent=None):
+        super(BluetoothConnectDialog, self).__init__(parent)
+        self.setWindowTitle("Connect to Bluetooth Device")
+        self.ble_api = ble_api
+
+        # Layout for the popup window
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # Label for searching status
+        self.status_label = QtWidgets.QLabel("Searching For Devices...", self)
+        layout.addWidget(self.status_label)
+
+        # Create a horizontal layout for the buttons
+        button_layout = QtWidgets.QHBoxLayout()
+
+        # Create a dropdown for available devices
+        self.device_dropdown = QtWidgets.QComboBox(self)
+        layout.addWidget(self.device_dropdown)
+
+        # Create a Search button
+        self.search_button = QtWidgets.QPushButton("Search", self)
+        self.search_button.setEnabled(False)  # Disabled while searching
+        button_layout.addWidget(self.search_button)
+
+        # Create a Connect button
+        self.connect_button = QtWidgets.QPushButton("Connect", self)
+        self.connect_button.setEnabled(False)  # Disabled until devices are found
+        button_layout.addWidget(self.connect_button)
+
+        layout.addLayout(button_layout)
+
+        # Signal-slot connection for the buttons
+        self.connect_button.clicked.connect(self.connect_to_device)
+        self.search_button.clicked.connect(self.start_search)
+
+        # Start the initial search for devices in a background thread
+        self.start_search()
+
+    def start_search(self):
+        """Start searching for devices in the background thread."""
+        self.device_dropdown.clear()  # Clear the dropdown list
+        self.connect_button.setEnabled(False)  # Disable connect button while searching
+        self.status_label.setText("Searching For Devices. Be Right Back...")  # Update status label
+        self.search_button.setEnabled(False)  # Disable search button while searching
+
+        # Start the search in a new background thread
+        self.search_thread = BluetoothDeviceSearchThread(self.ble_api)
+        self.search_thread.devices_found.connect(self.load_devices)
+        self.search_thread.start()
+
+    def load_devices(self, devices):
+        """Load BLE devices into the dropdown list once the search is complete."""
+        if devices:
+            self.device_dropdown.addItems(devices)
+            self.connect_button.setEnabled(True)  # Enable connect button when devices are found
+            self.status_label.setText(f"Found {len(devices)} device(s).")
+        else:
+            self.status_label.setText("No devices found.")
+        self.search_button.setEnabled(True)  # Enable search button after search completes
+
+    def connect_to_device(self):
+        """Attempt to connect to the selected device in a background thread."""
+        selected_device = self.device_dropdown.currentText()
+        if selected_device:
+            # Lock the buttons and show "Connecting to device..."
+            self.connect_button.setEnabled(False)
+            self.search_button.setEnabled(False)
+            self.status_label.setText(f"Connecting to {selected_device}...")
+
+            # Start the connection in a background thread
+            self.connect_thread = BluetoothConnectThread(self.ble_api, selected_device)
+            self.connect_thread.connection_result.connect(self.on_connection_finished)
+            self.connect_thread.start()
+
+    def on_connection_finished(self, success):
+        """Handle the result of the Bluetooth connection attempt."""
+        # Emit the connection result signal
+        self.device_selected_signal.emit(success)
+    
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # Show the connection status
+        QtWidgets.QMessageBox.information(self, "Connection Status",
+                                        f"Connection {'Succeeded' if success else 'Failed'}!")
+
+        # If the connection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if connection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Connection failed. Please try again.")
+
+    def disconnect_from_device(self):
+        """Attempt to disconnect the connected device."""
+        # Lock the buttons and show "Disconnecting from device..."
+        self.connect_button.setEnabled(False)
+        self.search_button.setEnabled(False)
+        self.status_label.setText(f"Disconnecting from {self.device_dropdown.currentText()}...")
+
+        # Attempt to disconnect
+        success = self.ble_api.disconnect_ble_device()
+
+        # Show the disconnection status
+        QtWidgets.QMessageBox.information(self, "Disconnection Status",
+                                        f"Disconnection {'Succeeded' if success else 'Failed'}!")
+
+        # Emit signal for future use
+        self.device_selected_signal.emit(success)
+
+        # Re-enable the buttons after the attempt
+        self.connect_button.setEnabled(True)
+        self.search_button.setEnabled(True)
+
+        # If the disconnection succeeds, close the dialog
+        if success:
+            self.accept()  # Close the dialog only if disconnection succeeds
+        else:
+            # Update status to reflect failure but keep the window open
+            self.status_label.setText("Disconnection failed. Please try again.")
+
+    def show_disconnect_confirmation(self):
+        """Show a confirmation dialog before disconnecting."""
+        reply = QtWidgets.QMessageBox.question(self, 'Disconnect Bluetooth Device',
+                                            "Are you sure you want to disconnect?",
+                                            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                                            QtWidgets.QMessageBox.StandardButton.No)
+        
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.disconnect_from_device()  # Call the method to disconnect
+        else:
+            self.status_label.setText("Disconnection cancelled.")
+
+
 class HapticCommandManager:
     def __init__(self, ble_api):
         self.ble_api = ble_api
-        self.command_queue = deque()
-        self.last_send_time = 0
+        self.command_queue = deque(maxlen=None)  
+        self.last_send_time_queue = 0
+        self.last_send_time_dequeue = 0
         self.is_playing = False
-        self.CHAIN_JUMP_INDEX = 20
-        self.CMD_SENDING_FREQ = 100  # Hz
+        self.CHAIN_JUMP_INDEX = 16
+        self.CMD_SENDING_FREQ = 200  # Hz
         self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
 
+        self.last_sent_addr = None
+        self.active_actuators = set()
+
+        self.last_sent_commands = [] # for the end of the slider use
+        self.active_signals = {}  # New variable to track currently playing signals
+
+
+    def detect_leaving_edges(self, current_amplitudes):
+        current_actuators = set(current_amplitudes.keys())
+        leaving_edges = self.active_actuators - current_actuators
+        stop_commands = [
+            (self.actuator_id_to_addr(actuator_id), 0, 0, 0)
+            for actuator_id in leaving_edges
+        ]
+        self.active_actuators = current_actuators
+        return stop_commands
+
+    def actuator_id_to_addr(self, actuator_id):
+        chain, index = actuator_id.split('.')
+        return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
+
     def map_amplitude_to_duty(self, amplitude):
-        # Map amplitude from [-1, 1] to [0, 15]
-        return int(round((amplitude + 1) * 7.5))
+        # Map amplitude from 0 to 1 to 0 to 15
+        return int(round(amplitude * 15))
+
 
     def map_frequency_to_freq_param(self, frequency):
-        if frequency <= 100:
-            return 0  # Use the lowest possible freq for <= 100 Hz
-        else:
-            # Map 100Hz to 500Hz to [0, 7]
-            mapped = int(round((frequency - 100) / (500 - 100) * 7))
-            return max(0, min(mapped, 7))  # Ensure it's within [0, 7]
-
-    def add_command(self, actuator_id, amplitude, frequency):
-        chain, index = actuator_id.split('.')
-        addr = (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
-
-        if frequency <= 100:
-            duty = self.map_amplitude_to_duty(amplitude)
-            freq = 0
-        else:
-            duty = 8
-            freq = self.map_frequency_to_freq_param(frequency)
-
-        self.command_queue.append((addr, duty, freq, 1))  # 1 for start
+        # Define the frequency set
+        frequency_set = [123, 145, 170, 200, 235, 275, 322, 384]
         
-        # Print the queued command
-        print(f"Command queued: Actuator {actuator_id}, Amplitude: {amplitude:.2f}, Frequency: {frequency:.2f} Hz")
+        # Find the closest frequency in the set
+        closest_freq = min(frequency_set, key=lambda x: abs(x - frequency))
+        
+        # Return the index of the closest frequency
+        return frequency_set.index(closest_freq)
 
-        self.command_queue.append((addr, duty, freq, 1))  # 1 for start
+    def prepare_command(self, actuator_id, amplitude, frequency):
+        addr = self.actuator_id_to_addr(actuator_id)
+        duty = self.map_amplitude_to_duty(amplitude)
+        freq = self.map_frequency_to_freq_param(frequency)
+        
+        return (addr, duty, freq, 1)  # 1 for start
 
     def process_commands(self):
         current_time = time.time()
-        if current_time - self.last_send_time >= self.CMD_SENDING_INTERVAL:
+        if current_time - self.last_send_time_dequeue >= self.CMD_SENDING_INTERVAL:
             if self.command_queue and self.is_playing:
-                addr, duty, freq, start_stop = self.command_queue.popleft()
-                self.ble_api.send_command(addr, duty, freq, start_stop)
-                
-                # Print the command details
-                actuator_id = f"{chr(ord('A') + addr // self.CHAIN_JUMP_INDEX)}.{addr % self.CHAIN_JUMP_INDEX + 1}"
-                command_type = "Start" if start_stop == 1 else "Stop"
-                print(f"Command sent: Actuator {actuator_id}, {command_type}, Duty: {duty}, Freq: {freq}")
-                
-                self.last_send_time = current_time
+                self.last_sent_commands = list(self.command_queue)  # Store a copy of the current commands
+                while self.command_queue:
+                    addr, duty, freq, start_stop = self.command_queue.popleft()
+                    self.ble_api.send_command(addr, duty, freq, start_stop)
+                    print(f"Sending command: Time {current_time}, Addr {addr}, Duty {duty}, Freq {freq}, Start/Stop {start_stop}")
+                    self.last_send_time_dequeue = current_time
+                    self.last_sent_addr = addr
+                # Optional: clear the command queue after processing
+                self.command_queue.clear()
 
     def start_playback(self):
         self.is_playing = True
+        self.command_queue.clear()
+        self.active_signals.clear()  # Clear previous active signals to ensure new ones are detected
 
     def stop_playback(self):
         self.is_playing = False
-        # Send stop commands for all active actuators
-        while self.command_queue:
-            addr, _, _, _ = self.command_queue.popleft()
-            self.ble_api.send_command(addr, 0, 0, 0)  # Stop the actuator
+        # Generate stop commands for all active actuators based on the current active signals
+        stop_commands = [
+            (self.actuator_id_to_addr(actuator_id), 0, 0, 0) 
+            for actuator_id in self.active_signals.keys()
+        ]
+        #print("STOP")
+        self.command_queue.clear()
+        
+        # Send STOP commands to the actuators
+        for cmd in stop_commands:
+            self.ble_api.send_command(*cmd)
+            current_time = time.time()
+            print(f"[Play Button Stopping] Sending command: Time{current_time}, Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
+            time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
 
-    def update(self, current_amplitudes):
-        if not self.is_playing:
-            return
+        # Clear active actuators and active signals after sending the stop commands
+        self.active_actuators.clear()
+        self.active_signals.clear()
 
-        for actuator_id, data in current_amplitudes.items():
-            amplitude = data['amplitude']
-            frequency = data.get('frequency', 100)  # Default to 100 Hz if not specified
-            self.add_command(actuator_id, amplitude, frequency)
+    def update(self, current_amplitudes, current_signals):
+        """Update the playing signals if there is a change."""
+        current_time = time.time()
 
+        # Detect leaving edges and generate stop commands
+        stop_commands = self.detect_leaving_edges(current_amplitudes)
+
+        # Prepare all commands for active actuators, ensuring we handle None parameters safely
+        active_commands = [
+            self.prepare_command(
+                actuator_id,
+                signal_details["current_amplitude"],
+                signal_details["current_frequency"]
+            )
+            for actuator_id, signal_details in current_amplitudes.items()
+        ]
+
+        # If active_signals is empty, treat it as the first update and force signal detection
+        if not self.active_signals or self.active_signals != current_signals:
+            # Update active signals if there's a change
+            self.active_signals = current_signals.copy()
+
+            # Log the current signals
+            current_time = time.time()
+            print("New signals detected or first update. Updating...")
+            for actuator_id, signal_details in current_signals.items():
+                print(f"Actuator ID: {actuator_id}")
+                print(f"  Type: {signal_details['type']}")
+                print(f"  Start Time: {signal_details['start_time']}")
+                print(f"  Stop Time: {signal_details['stop_time']}")
+                print(f"  Full Data Length: {len(signal_details['data'])}")
+                
+                
+                # Print the frequency from high_freq if available
+
+                # Print the frequency from high_freq if available
+                if "high_freq" in signal_details:
+                    print(f"  First High Frequency Value: {signal_details['high_freq'][0]}")
+                else:
+                    print("  No High Frequency Data available")
+
+                if "low_freq" in signal_details:
+                    print(f"  Low Frequency Data Length: {len(signal_details['low_freq'])}")
+                else:
+                    print("  No Low Frequency Data available")
+
+        # Time-guarded queueing logic
+        if current_time - self.last_send_time_queue >= self.CMD_SENDING_INTERVAL:
+            # Combine stop commands and active commands
+            all_commands = stop_commands + active_commands
+
+            # Sort commands to prioritize addresses that haven't been sent recently
+            all_commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
+
+            # Add all commands to the queue
+            self.command_queue.extend(all_commands)
+
+            # Update the last send time after queueing the commands
+            self.last_send_time_queue = current_time
+
+        # Process the commands (not time-guarded)
         self.process_commands()
 
+    def end_of_slider(self):
+        self.is_playing = False
+
+        # Similar to stop_playback, but use the last sent commands if the queue is empty
+        stop_commands = [
+            (addr, 0, 0, 0) for addr in set(cmd[0] for cmd in self.command_queue or self.last_sent_commands)
+        ]
+        #print("END OF SLIDER")
+        #print(self.command_queue)
+        self.command_queue.clear()
+        for cmd in stop_commands:
+            self.ble_api.send_command(*cmd)
+            print(f"[End of Slider] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
+            time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
+
+        # Clear active actuators
+        self.active_actuators.clear()
+        
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
         self.actuator_canvas = actuator_canvas
@@ -255,10 +521,13 @@ class DesignSaver:
                 'type': signal["type"],
                 'start_time': signal["start_time"],
                 'stop_time': signal["stop_time"],
-                'data': signal["data"],
+                'data': signal["data"],  # Original signal data
+                'high_freq': signal.get("high_freq", None),  # New high frequency data
+                'low_freq': signal.get("low_freq", None),    # New low frequency data
                 'parameters': signal["parameters"]
             } for signal in timeline_canvas.signals])
         return timeline_data
+
 
     def collect_mpl_canvas_data(self):
         return {
@@ -284,18 +553,23 @@ class DesignSaver:
             if actuator_id not in self.app_reference.actuator_signals:
                 self.app_reference.actuator_signals[actuator_id] = []
             
+            # Load signal data, including high and low frequency components
             self.app_reference.actuator_signals[actuator_id].append({
                 'type': signal_info['type'],
                 'start_time': signal_info['start_time'],
                 'stop_time': signal_info['stop_time'],
-                'data': signal_info['data'],
+                'data': signal_info['data'],  # Original data
+                'high_freq': signal_info.get('high_freq', None),  # High frequency data
+                'low_freq': signal_info.get('low_freq', None),    # Low frequency data
                 'parameters': signal_info['parameters']
             })
 
+        # Apply the signals to the timeline canvases
         for actuator_id, signals in self.app_reference.actuator_signals.items():
             if actuator_id in self.timeline_canvases:
                 self.timeline_canvases[actuator_id].signals = signals
                 self.timeline_canvases[actuator_id].plot_all_signals()
+
                 
 
     def apply_mpl_canvas_data(self, mpl_data):
@@ -309,6 +583,7 @@ class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=8, height=2, dpi=100, app_reference=None):
         self.app_reference = app_reference  # Reference to Haptics_App
         self.current_signal = None  # Track the current signal
+        self.current_signal_sampling_rate = None
         bg_color = (134/255, 150/255, 167/255)
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=bg_color)
         self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
@@ -373,29 +648,40 @@ class MplCanvas(FigureCanvas):
 
     def add_signal(self, signal_data, combine):
         new_signal = np.array(signal_data["data"])
-        print(self.current_signal)
-
- 
+        new_signal_sampling_rate = signal_data["value0"]["sampling_rate"]
+        print(new_signal_sampling_rate)
         
         if self.current_signal is None:
             self.current_signal = new_signal
-        else:
-            # If signals have different lengths, repeat the shorter one to match the longer one
-            if len(self.current_signal) > len(new_signal):
-                repeat_factor = len(self.current_signal) // len(new_signal) + 1
-                new_signal = np.tile(new_signal, repeat_factor)[:len(self.current_signal)]
-            elif len(self.current_signal) < len(new_signal):
-                repeat_factor = len(new_signal) // len(self.current_signal) + 1
-                self.current_signal = np.tile(self.current_signal, repeat_factor)[:len(new_signal)]
+            overall_t = len(self.current_signal)/TIME_STAMP
+
             
+        else:
+            # compare lengths and repeat the shorter one
+            current_signal_length = len(self.current_signal)
+            new_signal_length = len(new_signal)
+            
+            if current_signal_length > new_signal_length:
+                repeat_factor = current_signal_length // new_signal_length + 1
+                new_signal = np.tile(new_signal, repeat_factor)[:current_signal_length]
+            elif current_signal_length < new_signal_length:
+                repeat_factor = new_signal_length // current_signal_length + 1
+                self.current_signal = np.tile(self.current_signal, repeat_factor)[:new_signal_length]
+
+            # Combine or replace the signals
             if combine:
                 self.current_signal = self.current_signal * new_signal
             else:
                 self.current_signal = new_signal
+            
+            # Calculate the total time and adjust for plotting
+            overall_t = len(self.current_signal) / TIME_STAMP
+ 
+        t = np.linspace(0, overall_t, int(overall_t * TIME_STAMP))  # Generate t based on TIME_STAMP
 
-        t = np.linspace(0, 1, len(self.current_signal)) * (len(self.current_signal) / 2345)  # Adjust t for correct duration
-        
-        print("current_signal",self.current_signal)
+
+
+        # Plot the resampled signal
         self.plot(t, self.current_signal)
 
 
@@ -432,61 +718,78 @@ class MplCanvas(FigureCanvas):
             parameters = {}  # Dictionary to store parameters
 
             # Handle oscillators
-            if signal_type in ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]:
+            if signal_type in ["Sine", "Square", "Saw", "Triangle"]:
                 dialog = OscillatorDialog(signal_type, self)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_oscillator_json(signal_type, config["frequency"], config["rate"])
+                    customized_signal = self.generate_custom_general_oscillator_json(signal_type, config["frequency"], config["rate"], config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
-            # Handle envelopes
-            elif signal_type in ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier"]:
-                dialog = EnvelopeDialog(signal_type, self)
+            if signal_type in ["Chirp"]:
+                dialog = ChirpDialog(signal_type, self)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_envelope_json(signal_type, config["duration"], config["amplitude"])
+                    customized_signal = self.generate_custom_chirp_json(signal_type, config["chirp_type"], config["frequency"], config["rate"],config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
+            if signal_type in ["Noise"]:
+                dialog = NoiseDialog(signal_type, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    config = dialog.get_config()
+                    parameters = config  # Store the parameters
+                    customized_signal = self.generate_custom_noise_json(signal_type, config["gain"],config["duration"])
+                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
+            if signal_type in ["FM"]:
+                dialog = FMDialog(signal_type, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    config = dialog.get_config()
+                    parameters = config  # Store the parameters
+                    customized_signal = self.generate_custom_FM_json(signal_type, config["FM_type"], config["frequency"], config["modulation"],config["index"],config["duration"])
+                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
+            if signal_type in ["PWM"]:
+                dialog = PWMDialog(signal_type, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    config = dialog.get_config()
+                    parameters = config  # Store the parameters
+                    customized_signal = self.generate_custom_PWM_json(signal_type, config["frequency"],config["duty_cycle"], config["duration"])
+                    self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
+
 
             # If a customized signal was created or retrieved, add it to the plot
             if customized_signal:
                 self.add_signal(customized_signal, combine=True)
         
         self.app_reference.first_signal_drop += 1
-        # print("drop",self.app_reference.first_signal_drop)
+        print("drop",self.app_reference.first_signal_drop)
 
-
-    def generate_custom_envelope_json(self, signal_type, duration, amplitude):
-        num_samples = int(duration * 2345)  # Adjust the number of samples to match the duration
-        t = np.linspace(0, duration, num_samples)
-        # t = np.linspace(0, duration, 2345)  # Ensure that the time vector spans the entire duration
-
-        if signal_type == "Envelope":
-            data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(3 * t)).tolist()
-        elif signal_type == "Keyed Envelope":
-            data = (amplitude * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
-        elif signal_type == "ASR":
-            data = np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
-                                [lambda t: amplitude * (t / (0.3 * duration)), amplitude]).tolist()
-        elif signal_type == "ADSR":
-            data = np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
-                                [lambda t: amplitude * (t / (0.1 * duration)),
-                                lambda t: amplitude * (1 - 5 * (t - 0.1 * duration) / duration),
-                                0.5 * amplitude,
-                                lambda t: 0.5 * amplitude - 0.25 * amplitude * (t - 0.5 * duration) / duration,
-                                0.25 * amplitude]).tolist()
-        elif signal_type == "Exponential Decay":
-            data = (amplitude * np.exp(-5 * t / duration)).tolist()  # Scale the decay based on duration
-        elif signal_type == "PolyBezier":
-            data = (amplitude * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
+    def generate_custom_general_oscillator_json(self, signal_type, frequency, rate, duration):
+        t = np.linspace(0, duration, int(TIME_STAMP * duration))
+        if signal_type == "Sine":
+            data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
+        elif signal_type == "Square":
+            data = np.sign(np.sin(2 * np.pi * frequency * t)).tolist()
+        elif signal_type == "Saw":
+            data = (2 * (t * frequency - np.floor(t * frequency + 0.5))).tolist()
+        elif signal_type == "Triangle":
+            data = (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1).tolist()
+        elif signal_type == "FM":
+            data = np.sin(2 * np.pi * (frequency * t + rate * np.sin(2 * np.pi * frequency * t))).tolist()
+        elif signal_type == "PWM":
+            data = np.where(np.sin(2 * np.pi * frequency * t) >= 0, 1, -1).tolist()
+        elif signal_type == "Noise":
+            data = np.random.normal(0, 1, len(t)).tolist()
         else:
-            data = np.zeros_like(t).tolist()
+            data = np.zeros_like(t).tolist()  # Default for unsupported types
 
         return {
             "value0": {
-                "gain": amplitude,
+                "gain": 1.0,
                 "bias": 0.0,
+                "sampling_rate": TIME_STAMP,
                 "m_ptr": {
                     "polymorphic_id": 2147483649,
                     "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
@@ -497,7 +800,7 @@ class MplCanvas(FigureCanvas):
                             "m_model": {
                                 "IOscillator": {
                                     "x": {
-                                        "gain": 1.0,
+                                        "gain": frequency * 2 * np.pi,
                                         "bias": 0.0,
                                         "m_ptr": {
                                             "polymorphic_id": 2147483650,
@@ -520,32 +823,34 @@ class MplCanvas(FigureCanvas):
             "data": data
         }
 
-
-    def generate_custom_oscillator_json(self, signal_type, frequency, rate):
-        t = np.linspace(0, 1, 2345)
-        if signal_type == "Sine":
-            data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
-        elif signal_type == "Square":
-            data = np.sign(np.sin(2 * np.pi * frequency * t)).tolist()
-        elif signal_type == "Saw":
-            data = (2 * (t * frequency - np.floor(t * frequency + 0.5))).tolist()
-        elif signal_type == "Triangle":
-            data = (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1).tolist()
-        elif signal_type == "Chirp":
-            data = np.sin(2 * np.pi * (frequency * t + 0.5 * rate * t**2)).tolist()
-        elif signal_type == "FM":
-            data = np.sin(2 * np.pi * (frequency * t + rate * np.sin(2 * np.pi * frequency * t))).tolist()
-        elif signal_type == "PWM":
-            data = np.where(np.sin(2 * np.pi * frequency * t) >= 0, 1, -1).tolist()
-        elif signal_type == "Noise":
-            data = np.random.normal(0, 1, len(t)).tolist()
+    def generate_custom_chirp_json(self, signal_type, chirp_type, frequency, rate, duration):
+        # Time array
+        t = np.linspace(0, duration, int(TIME_STAMP * duration))
+        
+        # Calculate the frequency at each time point
+        instantaneous_frequency = frequency + rate * t
+        
+        if chirp_type == 'Sine':
+            # Generate the sine waveform with time-varying frequency
+            data = np.sin(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+        elif chirp_type == 'Square':
+            # Generate the square waveform with time-varying frequency
+            data = signal.square(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+        elif chirp_type == 'Saw':
+            # Generate the sawtooth waveform with time-varying frequency
+            data = signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+        elif chirp_type == 'Triangle':
+            # Generate the triangle waveform with time-varying frequency
+            data = signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP, 0.5)
         else:
             data = np.zeros_like(t).tolist()  # Default for unsupported types
+    
 
         return {
             "value0": {
                 "gain": 1.0,
                 "bias": 0.0,
+                "sampling_rate": TIME_STAMP,
                 "m_ptr": {
                     "polymorphic_id": 2147483649,
                     "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
@@ -557,6 +862,161 @@ class MplCanvas(FigureCanvas):
                                 "IOscillator": {
                                     "x": {
                                         "gain": frequency * 2 * np.pi,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": data
+        }
+    
+    def generate_custom_noise_json(self, signal_type, gain, duration):
+        t = np.linspace(0, duration, int(TIME_STAMP * duration))
+     
+        data = (gain * np.random.normal(0, 1, len(t))).tolist()
+
+
+
+        return {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "sampling_rate": TIME_STAMP,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": 0.0,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": data
+        }
+
+    def generate_custom_FM_json(self, signal_type, FM_type, frequency, modulation, index, duration):
+        # Time array
+        t = np.linspace(0, duration, int(TIME_STAMP * duration))
+        
+        # Instantaneous phase
+        instantaneous_phase = 2 * np.pi * frequency * t + index * np.sin(2 * np.pi * modulation * t)
+        
+        if FM_type == 'Sine':
+            # Generate the sine FM signal
+            data = np.sin(instantaneous_phase)
+        elif FM_type == 'Square':
+            # Generate the square FM signal
+            data = signal.square(instantaneous_phase)
+        elif FM_type == 'Saw':
+            # Generate the sawtooth FM signal
+            data = signal.sawtooth(instantaneous_phase)
+        elif FM_type == 'Triangle':
+            # Generate the triangle FM signal
+            data = signal.sawtooth(instantaneous_phase, 0.5)
+        else:
+            data = np.zeros_like(t).tolist()  # Default for unsupported types
+    
+
+        return {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "sampling_rate": TIME_STAMP,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": frequency * 2 * np.pi,
+                                        "bias": 0.0,
+                                        "m_ptr": {
+                                            "polymorphic_id": 2147483650,
+                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                            "ptr_wrapper": {
+                                                "valid": 1,
+                                                "data": {
+                                                    "Concept": {},
+                                                    "m_model": {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "data": data
+        }
+   
+    def generate_custom_PWM_json(self, signal_type, frequency, duty_cycle, duration):
+        # Time array
+        t = np.linspace(0, duration, int(TIME_STAMP * duration))
+        
+        # Calculate the period of the PWM signal
+        period = 1 / frequency
+        
+        # Generate the PWM signal
+        data = ((t % period) < (duty_cycle / 100) * period).astype(float)
+    
+
+        return {
+            "value0": {
+                "gain": 1.0,
+                "bias": 0.0,
+                "sampling_rate": TIME_STAMP,
+                "m_ptr": {
+                    "polymorphic_id": 2147483649,
+                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                    "ptr_wrapper": {
+                        "valid": 1,
+                        "data": {
+                            "Concept": {},
+                            "m_model": {
+                                "IOscillator": {
+                                    "x": {
+                                        "gain": 0.0,
                                         "bias": 0.0,
                                         "m_ptr": {
                                             "polymorphic_id": 2147483650,
@@ -642,15 +1102,285 @@ class OscillatorDialog(QDialog):
         layout = QVBoxLayout(self)
         
         form_layout = QFormLayout()
+
+
         self.frequency_input = QDoubleSpinBox()
         self.frequency_input.setRange(0, 400)  # Adjust range as needed
-        self.frequency_input.setValue(10)  # Default value
+        self.frequency_input.setValue(100)  # Default value
         form_layout.addRow("Frequency (Hz):", self.frequency_input)
         
         self.rate_input = QDoubleSpinBox()
         self.rate_input.setRange(0, 1000)  # Adjust range as needed
         self.rate_input.setValue(0)  # Default value
         form_layout.addRow("Rate:", self.rate_input)
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+
+        self.duration_input.setSingleStep(1)  # Increment in 1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        return {
+            "duration": self.duration_input.value(),
+            "frequency": self.frequency_input.value(),
+            "rate": self.rate_input.value()
+        }
+
+class ChirpDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+
+        # Signal Type (Radio Buttons with Circular Layout)
+        signal_layout = QHBoxLayout()
+
+        # Create the radio buttons
+        self.sine_radio = QRadioButton("Sine")
+        self.square_radio = QRadioButton("Square")
+        self.saw_radio = QRadioButton("Saw")
+        self.triangle_radio = QRadioButton("Triangle")
+
+        # Button group to manage radio buttons (ensures mutual exclusivity)
+        self.signal_group = QButtonGroup(self)
+        self.signal_group.addButton(self.sine_radio)
+        self.signal_group.addButton(self.square_radio)
+        self.signal_group.addButton(self.saw_radio)
+        self.signal_group.addButton(self.triangle_radio)
+
+        self.sine_radio.setChecked(True)
+
+        # Set the default checked radio button based on signal_type
+        if signal_type == "Sine":
+            self.sine_radio.setChecked(True)
+        elif signal_type == "Square":
+            self.square_radio.setChecked(True)
+        elif signal_type == "Saw":
+            self.saw_radio.setChecked(True)
+        elif signal_type == "Triangle":
+            self.triangle_radio.setChecked(True)
+
+        # Add radio buttons to the layout
+        signal_layout.addWidget(self.sine_radio)
+        signal_layout.addWidget(self.square_radio)
+        signal_layout.addWidget(self.saw_radio)
+        signal_layout.addWidget(self.triangle_radio)
+
+        # Add the signal layout to the form layout
+        form_layout.addRow("Signal Type:", signal_layout)
+
+        self.frequency_input = QDoubleSpinBox()
+        self.frequency_input.setRange(0, 400)  # Adjust range as needed
+        self.frequency_input.setValue(20)  # Default value
+        form_layout.addRow("Frequency (Hz):", self.frequency_input)
+        
+        self.rate_input = QDoubleSpinBox()
+        self.rate_input.setRange(0, 1000)  # Adjust range as needed
+        self.rate_input.setValue(100)  # Default value
+        form_layout.addRow("Rate:", self.rate_input)
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+
+        self.duration_input.setSingleStep(1)  # Increment in 1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        if self.sine_radio.isChecked():
+            selected_signal = "Sine"
+        elif self.square_radio.isChecked():
+            selected_signal = "Square"
+        elif self.saw_radio.isChecked():
+            selected_signal = "Saw"
+        elif self.triangle_radio.isChecked():
+            selected_signal = "Triangle"
+        return {
+            "duration": self.duration_input.value(),
+            "chirp_type": selected_signal,
+            "frequency": self.frequency_input.value(),
+            "rate": self.rate_input.value()
+        }
+
+class NoiseDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+
+        self.gain_input = QDoubleSpinBox()
+        self.gain_input.setRange(0, 1)  # Adjust range as needed
+        self.gain_input.setDecimals(1)  # Allow up to two decimal places
+        self.gain_input.setSingleStep(0.1)  # Increment in 0.1s steps
+        self.gain_input.setValue(1)  # Default value
+        form_layout.addRow("Gain:", self.gain_input)
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+
+        self.duration_input.setSingleStep(1)  # Increment in 1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+        
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        return {
+            "duration": self.duration_input.value(),
+            "gain": self.gain_input.value(),
+        }
+
+class FMDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+
+        # Signal Type (Radio Buttons with Circular Layout)
+        signal_layout = QHBoxLayout()
+
+        # Create the radio buttons
+        self.sine_radio = QRadioButton("Sine")
+        self.square_radio = QRadioButton("Square")
+        self.saw_radio = QRadioButton("Saw")
+        self.triangle_radio = QRadioButton("Triangle")
+
+        # Button group to manage radio buttons (ensures mutual exclusivity)
+        self.signal_group = QButtonGroup(self)
+        self.signal_group.addButton(self.sine_radio)
+        self.signal_group.addButton(self.square_radio)
+        self.signal_group.addButton(self.saw_radio)
+        self.signal_group.addButton(self.triangle_radio)
+
+        self.sine_radio.setChecked(True)
+
+        # Set the default checked radio button based on signal_type
+        if signal_type == "Sine":
+            self.sine_radio.setChecked(True)
+        elif signal_type == "Square":
+            self.square_radio.setChecked(True)
+        elif signal_type == "Saw":
+            self.saw_radio.setChecked(True)
+        elif signal_type == "Triangle":
+            self.triangle_radio.setChecked(True)
+
+        # Add radio buttons to the layout
+        signal_layout.addWidget(self.sine_radio)
+        signal_layout.addWidget(self.square_radio)
+        signal_layout.addWidget(self.saw_radio)
+        signal_layout.addWidget(self.triangle_radio)
+
+        # Add the signal layout to the form layout
+        form_layout.addRow("Signal Type:", signal_layout)
+
+        self.frequency_input = QDoubleSpinBox()
+        self.frequency_input.setRange(0, 400)  # Adjust range as needed
+        self.frequency_input.setValue(10)  # Default value
+        form_layout.addRow("Frequency (Hz):", self.frequency_input)
+        
+        self.modulation_input = QDoubleSpinBox()
+        self.modulation_input.setRange(0, 40)  # Adjust range as needed
+        self.modulation_input.setValue(10)  # Default value
+        form_layout.addRow("Modulation Frequency (Hz):", self.modulation_input)
+
+        self.index_input = QDoubleSpinBox()
+        self.index_input.setRange(0, 25)  # Adjust range as needed
+        self.index_input.setValue(2)  # Default value
+        form_layout.addRow("Index:", self.index_input)
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+        self.duration_input.setSingleStep(1)  # Increment in 1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+        
+        layout.addLayout(form_layout)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_config(self):
+        if self.sine_radio.isChecked():
+            selected_signal = "Sine"
+        elif self.square_radio.isChecked():
+            selected_signal = "Square"
+        elif self.saw_radio.isChecked():
+            selected_signal = "Saw"
+        elif self.triangle_radio.isChecked():
+            selected_signal = "Triangle"
+        return {
+            "duration": self.duration_input.value(),
+            "FM_type": selected_signal,
+            "frequency": self.frequency_input.value(),
+            "modulation": self.modulation_input.value(),
+            "index": self.index_input.value()
+        }
+
+class PWMDialog(QDialog):
+    def __init__(self, signal_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Customize {signal_type} Signal")
+        
+        layout = QVBoxLayout(self)
+        
+        form_layout = QFormLayout()
+
+        self.frequency_input = QDoubleSpinBox()
+        self.frequency_input.setRange(0, 400)  # Adjust range as needed
+        self.frequency_input.setValue(10)  # Default value
+        form_layout.addRow("Frequency (Hz):", self.frequency_input)
+
+
+        self.duty_cycle_input = QDoubleSpinBox()
+        self.duty_cycle_input.setRange(0, 100)  # Adjust range as needed
+        self.duty_cycle_input.setValue(70)  # Default value
+        form_layout.addRow("Duty Cycle (%):", self.duty_cycle_input)
+
+        # Configure the duration input
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
+        self.duration_input.setValue(1)  # Default value
+
+        self.duration_input.setSingleStep(1)  # Increment in 1s steps
+        form_layout.addRow("Duration (s):", self.duration_input)
+        
         
         layout.addLayout(form_layout)
         
@@ -662,46 +1392,8 @@ class OscillatorDialog(QDialog):
     def get_config(self):
         return {
             "frequency": self.frequency_input.value(),
-            "rate": self.rate_input.value()
-        }
-
-class EnvelopeDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 1000)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-        self.duration_input.setDecimals(2)  # Allow up to two decimal places
-        self.duration_input.setSingleStep(0.1)  # Increment in 0.1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-
-        # Configure the amplitude input
-        self.amplitude_input = QDoubleSpinBox()
-        self.amplitude_input.setRange(0, 1)  # Allow amplitude to be any value between -10 and 10
-        self.amplitude_input.setValue(1)  # Default value
-        self.amplitude_input.setDecimals(2)  # Allow up to two decimal places
-        self.amplitude_input.setSingleStep(0.1)  # Increment in 0.1 steps
-        form_layout.addRow("Amplitude:", self.amplitude_input)
-        
-        layout.addLayout(form_layout)
-        
-        # OK and Cancel buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        return {
+            "duty_cycle": self.duty_cycle_input.value(),
             "duration": self.duration_input.value(),
-            "amplitude": self.amplitude_input.value()
         }
 
 # Define the ACTUATOR_CONFIG dictionary
@@ -769,7 +1461,6 @@ class ActuatorSignalHandler(QObject):
     def __init__(self, actuator_id, parent=None):
         super().__init__(parent)
         self.actuator_id = actuator_id
-
 
 class Actuator(QGraphicsItem):
     # properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
@@ -886,7 +1577,6 @@ class Actuator(QGraphicsItem):
             self.signal_handler.clicked.emit(self.id)  # Emit the signal with the actuator's ID
         super().mousePressEvent(event)
         
-
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -932,7 +1622,6 @@ class Actuator(QGraphicsItem):
         # Trigger a redraw of all lines
         canvas.redraw_all_lines()
 
-    
     def adjust_text_position(self, vertical_offset, horizontal_offset):
         self.text_vertical_offset = vertical_offset
         self.text_horizontal_offset = horizontal_offset
@@ -1681,7 +2370,6 @@ class ActuatorCanvas(QGraphicsView):
                 actuator.setSelected(False)  # Remove highlight
         self.update()  # Ensure the canvas is updated
 
-
 class SelectionBarView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(parent)
@@ -1898,6 +2586,8 @@ class TimelineCanvas(FigureCanvas):
         self.fig = Figure(figsize=(width, height), dpi=dpi, facecolor=color)
         self.axes = self.fig.add_axes([0.1, 0.15, 0.8, 0.8])  # Use add_axes to create a single plot
         self.axes.set_facecolor(color)
+
+        self.segmentation_api = signal_segmentation_api()
         
         # Set spine color and customize appearance
         spine_color = to_rgba((240/255, 235/255, 229/255))
@@ -1926,12 +2616,12 @@ class TimelineCanvas(FigureCanvas):
 
     # dragggg
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 10:
+        if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 2:
             self._dragging = True
             self._last_mouse_x = event.position().x()
     # dragggg
     def mouseMoveEvent(self, event):
-        if self._dragging and self.signal_duration > 10:
+        if self._dragging and self.signal_duration > 2:
             dx = event.position().x() - self._last_mouse_x
             self._last_mouse_x = event.position().x()
             xmin, xmax = self.axes.get_xlim()
@@ -1987,7 +2677,9 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -1996,13 +2688,17 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["high_freq"] = signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["low_freq"] = signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
                     adjusted_signals.append(signal)
 
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["high_freq"] = signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["low_freq"] = signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
                 adjusted_signals.append(signal)
 
             elif new_start_time <= signal["start_time"] and new_stop_time >= signal["stop_time"]:
@@ -2016,13 +2712,16 @@ class TimelineCanvas(FigureCanvas):
         # Add the new signal as well
         adjusted_signals.append({
             "type": new_signal_type,
-            "data": new_signal_data,
+            "data": new_signal_data["data"],
+            "high_freq": new_signal_data["high_freq"],
+            "low_freq": new_signal_data["low_freq"],
             "start_time": new_start_time,
             "stop_time": new_stop_time,
             "parameters": new_signal_parameters
         })
 
-        print(adjusted_signals)
+        # print(adjusted_signals)
+        #print("LOL")
 
         self.signals = adjusted_signals
         self.plot_all_signals()  # Update the plot with the modified signals
@@ -2037,7 +2736,9 @@ class TimelineCanvas(FigureCanvas):
                     # Trim the end of the original signal and keep the non-overlapping part
                     signal_part = {
                         "type": signal["type"],
-                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                        "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                        "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                         "start_time": signal["start_time"],
                         "stop_time": new_start_time,
                         "parameters": signal["parameters"]
@@ -2046,25 +2747,33 @@ class TimelineCanvas(FigureCanvas):
                 else:
                     # Remove the overlapping portion of the original signal
                     signal["stop_time"] = new_start_time
-                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * 2345)]
+                    signal["data"] = signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["high_freq"] = signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
+                    signal["low_freq"] = signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)]
                     adjusted_signals.append(signal)
             elif signal["start_time"] < new_stop_time < signal["stop_time"]:
                 # Case: The new signal overlaps the start of this signal
                 signal["start_time"] = new_stop_time
-                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * 2345):]
+                signal["data"] = signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["high_freq"] = signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
+                signal["low_freq"] = signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):]
                 adjusted_signals.append(signal)
             elif signal["start_time"] < new_start_time and signal["stop_time"] > new_stop_time:
                 # Case: The new signal completely overlaps this signal
                 signal_part1 = {
                     "type": signal["type"],
-                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * 2345)],
+                    "data": signal["data"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                    "high_freq": signal["high_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
+                    "low_freq": signal["low_freq"][:int((new_start_time - signal["start_time"]) * TIME_STAMP)],
                     "start_time": signal["start_time"],
                     "stop_time": new_start_time,
                     "parameters": signal["parameters"]
                 }
                 signal_part2 = {
                     "type": signal["type"],
-                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * 2345):],
+                    "data": signal["data"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
+                    "high_freq": signal["high_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
+                    "low_freq": signal["low_freq"][int((new_stop_time - signal["start_time"]) * TIME_STAMP):],
                     "start_time": new_stop_time,
                     "stop_time": signal["stop_time"],
                     "parameters": signal["parameters"]
@@ -2098,16 +2807,57 @@ class TimelineCanvas(FigureCanvas):
             if signal_data:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
-                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
+                        self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters=None)
                     else:
-                        self.record_signal(signal_type, signal_data, start_time, stop_time, None)
+                        self.record_signal(signal_type, signal_data, start_time, stop_time, parameters=None)
+
+        # If the signal is not in custom or imported signals, prompt for parameters
         else:
             parameters = self.prompt_signal_parameters(signal_type)
             if parameters is not None:
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
                     signal_data = self.generate_signal_data(signal_type, parameters)
+
+                    # Perform segmentation to get high and low frequency components
+                    high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
+                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
+                    )
+
+                    # Keep the original structure with "data" and add the new frequency components
+                    signal_data = {
+                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'high_freq': high_freq_signal.tolist(),  # High frequency data
+                        'low_freq': low_freq_signal.tolist()     # Low frequency data
+                    }
+
+                    # Print the lengths of data, high_freq, and low_freq
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+
+
+                    # Check for overlapping signals and handle accordingly
                     if self.check_overlap(start_time, stop_time):
                         self.handle_overlap(start_time, stop_time, signal_type, signal_data, parameters)
                     else:
@@ -2122,7 +2872,6 @@ class TimelineCanvas(FigureCanvas):
         self.app_reference.update_pushButton_5_state()
 
 
-
     def prompt_signal_parameters(self, signal_type):
         # Define mappings between signal types and dialogs
         signal_dialog_map = {
@@ -2130,17 +2879,10 @@ class TimelineCanvas(FigureCanvas):
             "Square": OscillatorDialog,
             "Saw": OscillatorDialog,
             "Triangle": OscillatorDialog,
-            "Chirp": OscillatorDialog,
-            "FM": OscillatorDialog,
-            "PWM": OscillatorDialog,
-            "Noise": OscillatorDialog,
-            "Envelope": EnvelopeDialog,
-            "Keyed Envelope": EnvelopeDialog,
-            "ASR": EnvelopeDialog,
-            "ADSR": EnvelopeDialog,
-            "Exponential Decay": EnvelopeDialog,
-            "PolyBezier": EnvelopeDialog,
-            "Signal Envelope": EnvelopeDialog
+            "Chirp": ChirpDialog,
+            "FM": FMDialog,
+            "PWM": PWMDialog,
+            "Noise": NoiseDialog,
         }
         
         # Get the dialog class based on signal type
@@ -2169,22 +2911,27 @@ class TimelineCanvas(FigureCanvas):
 
 
     def record_signal(self, signal_type, signal_data, start_time, stop_time, parameters):
-        # Record the signal data and its parameters into the signals list
-        print("Reached Record Signal")
+        """Record the signal to the timelinecanvas. In there the signal_data is unpacked to "data", "high_freq", and "low_freq" """
+        # Record the signal data, including original, high frequency, and low frequency components
+        print("Recorded")
         self.signals.append({
             "type": signal_type,
-            "data": signal_data,
+            "data": signal_data['data'],          # Store the original data as "data"
+            "high_freq": signal_data['high_freq'],  # Store high frequency data
+            "low_freq": signal_data['low_freq'],    # Store low frequency data
             "start_time": start_time,
             "stop_time": stop_time,
             "parameters": parameters
         })
-        print(self.signals)
 
     def plot_all_signals(self):
+        # Set a variable to control which signal component to plot
+        component_to_plot = 'data'  # Options: 'data', 'high_freq', 'low_freq'
+
         if not self.signals:
             # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
             default_duration = 10  # seconds
-            t = np.linspace(0, default_duration, 2345 * default_duration)
+            t = np.linspace(0, default_duration, TIME_STAMP * default_duration)
             signal_data = np.zeros_like(t)
             self.plot_signal_data(t, signal_data)
             return
@@ -2192,33 +2939,38 @@ class TimelineCanvas(FigureCanvas):
         # Determine the max stop time across all recorded signals
         max_stop_time = max([signal["stop_time"] for signal in self.signals])
 
-        # dragggg
         # Store the signal duration for use in dragging functionality
         self.signal_duration = max_stop_time
 
         # Initialize an empty array of zeros for the full duration
-        total_samples = int(max_stop_time * 2345)
+        total_samples = int(max_stop_time * TIME_STAMP)
         combined_signal = np.zeros(total_samples)
 
-        # Fill in the combined signal with each recorded signal's data
+        # Fill in the combined signal with each recorded signal's selected data component
         for signal in self.signals:
-            start_sample = int(signal["start_time"] * 2345)
-            stop_sample = int(signal["stop_time"] * 2345)
+            start_sample = int(signal["start_time"] * TIME_STAMP)
+            stop_sample = int(signal["stop_time"] * TIME_STAMP)
             signal_duration = stop_sample - start_sample
-            # Adjust the signal_data to fit the required duration (stretch or truncate as needed)
-            if len(signal["data"]) > 0:
-                signal_data = np.tile(signal["data"], int(np.ceil(signal_duration / len(signal["data"]))))[:signal_duration]
+
+            # Use only the selected component (data, high_freq, low_freq)
+            if component_to_plot in signal and len(signal[component_to_plot]) > 0:
+                # Adjust the signal data to fit the required duration (stretch or truncate as needed)
+                signal_data = np.tile(signal[component_to_plot], int(np.ceil(signal_duration / len(signal[component_to_plot]))))[:signal_duration]
+
+                # If the adjusted signal_data is still too short, pad it with zeros
+                if len(signal_data) < signal_duration:
+                    signal_data = np.pad(signal_data, (0, signal_duration - len(signal_data)), 'constant')
             else:
-                # Handle the case where signal["data"] is empty
-                # You can either skip this signal or generate a default signal.
-                print(f"Warning: signal data is empty for signal {signal['type']}.")
+                # Handle the case where the selected component is empty or not available
                 signal_data = np.zeros(signal_duration)  # Fallback to an empty signal for this duration
 
+            # Perform the assignment to the combined signal
             combined_signal[start_sample:stop_sample] = signal_data
 
         # Generate time array for the x-axis
         t = np.linspace(0, max_stop_time, total_samples)
         self.plot_signal_data(t, combined_signal)
+
 
     def plot_signal_data(self, t, signal_data):
         # Clear the current plot and plot the new signal
@@ -2238,9 +2990,10 @@ class TimelineCanvas(FigureCanvas):
         # Plot the signal data
         self.axes.plot(t, signal_data, color=spine_color)
 
+        #draggg
         # Check if the signal is longer than 10 seconds
-        if self.signal_duration > 10:
-            self.axes.set_xlim(0, 10)  # Show only the first 10 seconds initially
+        if self.signal_duration > 2:
+            self.axes.set_xlim(0, 2)  # Show only the first 10 seconds initially
             
             # Adjust arrow size and location using mutation_scale
             arrow_props = dict(facecolor='gray', edgecolor='none', alpha=0.6, mutation_scale=50)
@@ -2261,73 +3014,57 @@ class TimelineCanvas(FigureCanvas):
 
     def generate_signal_data(self, signal_type, parameters):
         # Generate the signal data based on the type and modified parameters
-        
+        t = np.linspace(0, parameters["duration"], int(TIME_STAMP * parameters["duration"]))
         if signal_type == "Sine":
-            t = np.linspace(0, 1, 2345)
             return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
         elif signal_type == "Square":
-            t = np.linspace(0, 1, 2345)
             return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
         elif signal_type == "Saw":
-            t = np.linspace(0, 1, 2345)
             return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
         elif signal_type == "Triangle":
-            t = np.linspace(0, 1, 2345)
             return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
         elif signal_type == "Chirp":
-            t = np.linspace(0, 1, 2345)
-            return np.sin(2 * np.pi * (parameters["frequency"] * t + 0.5 * parameters["rate"] * t**2)).tolist()
-        elif signal_type == "FM":
-            t = np.linspace(0, 1, 2345)
-            return np.sin(2 * np.pi * (parameters["frequency"] * t + parameters["rate"] * np.sin(2 * np.pi * parameters["frequency"] * t))).tolist()
+            instantaneous_frequency = parameters["frequency"] + parameters["rate"] * t
+            if parameters["chirp_type"] == 'Sine':
+                # Generate the sine waveform with time-varying frequency
+                return np.sin(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+            elif parameters["chirp_type"] == 'Square':
+                # Generate the square waveform with time-varying frequency
+                return signal.square(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+            elif parameters["chirp_type"] == 'Saw':
+                # Generate the sawtooth waveform with time-varying frequency
+                return signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+            elif parameters["chirp_type"] == 'Triangle':
+                # Generate the triangle waveform with time-varying frequency
+                return signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP, 0.5)
+            else:
+                return np.zeros_like(t).tolist()  # Default for unsupported types
         elif signal_type == "PWM":
-            t = np.linspace(0, 1, 2345)
-            return np.where(np.sin(2 * np.pi * parameters["frequency"] * t) >= 0, 1, -1).tolist()
+            period = 1 / parameters["frequency"]
+            return ((t % period) < (parameters["duty_cycle"] / 100) * period).astype(float)
+        elif signal_type == "FM":
+                    
+            # Instantaneous phase
+            instantaneous_phase = 2 * np.pi * parameters["frequency"] * t + parameters["index"] * np.sin(2 * np.pi * parameters["modulation"] * t)
+            
+            if parameters["FM_type"] == 'Sine':
+                # Generate the sine FM signal
+                return np.sin(instantaneous_phase)
+            elif parameters["FM_type"] == 'Square':
+                # Generate the square FM signal
+                return signal.square(instantaneous_phase)
+            elif parameters["FM_type"] == 'Saw':
+                # Generate the sawtooth FM signal
+                return signal.sawtooth(instantaneous_phase)
+            elif parameters["FM_type"] == 'Triangle':
+                # Generate the triangle FM signal
+                return signal.sawtooth(instantaneous_phase, 0.5)
+            else:
+                return np.zeros_like(t).tolist()  # Default for unsupported types
         elif signal_type == "Noise":
-            t = np.linspace(0, 1, 2345)
-            return np.random.normal(0, 1, len(t)).tolist()
-        elif signal_type == "Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(3 * t)).tolist()
-        elif signal_type == "Keyed Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.sin(2 * np.pi * 5 * t) * np.exp(-3 * t)).tolist()
-        elif signal_type == "ASR":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.3 * duration, t >= 0.3 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.3 * duration)), parameters["amplitude"]]).tolist()
-        elif signal_type == "ADSR":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return np.piecewise(t, [t < 0.1 * duration, t < 0.2 * duration, t < 0.5 * duration, t < 0.7 * duration, t >= 0.7 * duration],
-                                [lambda t: parameters["amplitude"] * (t / (0.1 * duration)),
-                                lambda t: parameters["amplitude"] * (1 - 5 * (t - 0.1 * duration) / duration),
-                                0.5 * parameters["amplitude"],
-                                lambda t: 0.5 * parameters["amplitude"] - 0.25 * parameters["amplitude"] * (t - 0.5 * duration) / duration,
-                                0.25 * parameters["amplitude"]]).tolist()
-        elif signal_type == "Exponential Decay":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.exp(-5 * t / parameters["duration"])).tolist()
-        elif signal_type == "PolyBezier":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * (t ** 3 - 3 * t ** 2 + 3 * t)).tolist()
-        elif signal_type == "Signal Envelope":
-            duration = parameters["duration"]
-            num_samples = int(duration * 2345)
-            t = np.linspace(0, duration, num_samples)
-            return (parameters["amplitude"] * np.abs(np.sin(2 * np.pi * 3 * t))).tolist()
-        return np.zeros_like(t).tolist()
+            return (parameters["gain"] * np.random.normal(0, 1, len(t))).tolist()
+        else: 
+            return np.zeros_like(t).tolist()
 
     def get_signal_data(self, signal_type):
         # Retrieve signal data based on signal_type
@@ -2344,7 +3081,6 @@ class TimelineCanvas(FigureCanvas):
             stop_time = dialog.stop_time_input.value()
             return start_time, stop_time
         return None, None
-
 
 class TimeInputDialog(QDialog):
     def __init__(self, signal_type, parent=None):
@@ -2392,7 +3128,6 @@ class CanvasSizeDialog(QDialog):
         button.clicked.connect(self.accept)
         self.layout.addWidget(button)
         
-
 class FloatingVerticalSlider(QSlider):
     def __init__(self, parent=None, app_reference=None):
         super().__init__(Qt.Orientation.Vertical, parent)
@@ -2418,14 +3153,30 @@ class FloatingVerticalSlider(QSlider):
         self.slider_start_pos = None
         self.slider_movable = True  # Add a flag to control movement
 
-        # Calculate the minimum x position (3 cm from the left edge)
+        # Calculate the minimum and maximum x positions (3 cm from the left edge and 1 cm from the right edge)
         dpi = self.logicalDpiX()  # Get the screen DPI
-        self.cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-
+        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (3 / 2.54) * dpi  # 1 cm in pixels
         self.global_total_time = None
 
         # Store the initial vertical position to lock it
         self.initial_y = self.y()
+
+    def update_movable_range(self):
+        """Recalculate the slider's movable range based on the window size."""
+        dpi = self.logicalDpiX()
+        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (3 / 2.54) * dpi  # 3 cm in pixels
+
+        # Ensure slider is within new bounds after resizing
+        max_x = int(self.parent().width() - self.width() - self.right_offset)  # Cast to int
+        min_x = int(self.left_offset)  # Cast to int
+
+        current_x = self.x()
+        new_x = max(min_x, min(current_x, max_x))
+        
+        # Reposition slider based on new boundaries, cast to int
+        self.move(int(new_x), int(self.y()))  # Ensure both x and y positions are integers
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -2441,53 +3192,68 @@ class FloatingVerticalSlider(QSlider):
 
     def mouseMoveEvent(self, event):
         if not self.slider_movable:
-            event.ignore()  # Ignore movement events to prevent moving the slider
+            event.ignore()
             return
 
         if event.buttons() & Qt.MouseButton.LeftButton and self.slider_start_pos is not None:
             delta_x = event.globalPosition().x() - self.slider_start_pos.x()
             self.slider_start_pos = event.globalPosition().toPoint()
 
-            new_x = int(self.x() + delta_x)
-            max_x = self.parent().width() - self.width()
+            new_x = int(self.x() + delta_x)  # Cast to int to ensure it's an integer
+            max_x = int(self.parent().width() - self.width() - self.right_offset)  # Cast to int
+            min_x = int(self.left_offset)  # Cast to int
 
-            # Prevent dragging before the 3 cm position
-            new_x = max(new_x, int(self.cm_to_pixels))
+            new_x = max(min_x, min(new_x, max_x))  # Ensure the slider is between 3 cm and 1 cm from edges
 
-            # Keep the slider within bounds
-            if new_x > max_x:
-                new_x = max_x
+            self.move(int(new_x), self.y())  # Cast new_x to int before passing to move()
 
-            # Move the slider
-            self.move(new_x, self.y())
-
-            # Update actuator highlights based on the slider's new position
             self.update_actuator_highlight(new_x)
 
-            super().mouseMoveEvent(event)
+            total_time = self.app_reference.calculate_total_time()
+            if total_time > 0:
+                time_position = total_time * (new_x - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
+                self.app_reference.update_current_amplitudes(time_position)
 
+        super().mouseMoveEvent(event)
 
     def update_actuator_highlight(self, slider_position):
-        adjusted_width = self.parent().width() - self.cm_to_pixels
-        new_pos = slider_position - self.cm_to_pixels
+        # Adjust for left and right offsets
+        adjusted_width = self.parent().width() - self.left_offset - self.right_offset
+        new_pos = slider_position - self.left_offset
         
-        # Ensure the global total time is valid
-        if self.global_total_time is None:
-            # Find the global largest stop time across all actuators
-            all_stop_times = []
-            for signals in self.app_reference.actuator_signals.values():
-                all_stop_times.extend([signal["stop_time"] for signal in signals])
-            
-            if all_stop_times:
-                self.global_total_time = max(all_stop_times)
-            else:
-                print("Warning: Total time is not set or invalid.")
-
-        if self.global_total_time is not None and self.global_total_time > 0:
-            time_position = (new_pos / adjusted_width) * self.global_total_time
+        total_time = self.app_reference.calculate_total_time()
+        if total_time > 0:
+            time_position = (new_pos / adjusted_width) * total_time
             self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
+            self.app_reference.update_current_amplitudes(time_position)
         else:
-            print("Warning: app_reference or global_total_time is missing.")
+            print("Warning: No signals found or invalid total time.")   
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
+class SliderThread(QThread):
+    slider_moved = pyqtSignal(int)  # Signal emitted with the new slider position
+
+    def __init__(self, parent=None, total_time=None, step=1):
+        super().__init__(parent)
+        self.total_time = total_time
+        self.step = step
+        self.running = False
+
+    def run(self):
+        self.running = True
+        current_time = 0
+
+        while self.running and current_time < self.total_time:
+            self.msleep(70)  # Adjust the sleep time to control speed
+            current_time += self.step
+            self.slider_moved.emit(current_time)
+
+            if current_time >= self.total_time:
+                self.running = False
+
+    def stop(self):
+        self.running = False
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -2659,6 +3425,59 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Call this method initially to set the state of pushButton_5
         self.update_pushButton_5_state()
 
+        self.current_amplitudes = {}
+
+        self.ble_api = python_ble_api()
+        self.haptic_manager = HapticCommandManager(self.ble_api)
+
+        self.ui.actionConnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_connect_dialog)
+        self.ui.actionDisconnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_disconnect_dialog)
+
+        self.bluetooth_connected = False
+
+        self.slider_thread = None
+
+    def show_bluetooth_connect_dialog(self):
+        """Show the Bluetooth connection dialog if no device is currently connected."""
+        if not self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_connection_status)  # Handle connection signal
+            dialog.exec()  # Show the dialog
+        else:
+            # If a device is already connected, show a warning message
+            QtWidgets.QMessageBox.warning(self, "Bluetooth Connection",
+                                        "A Bluetooth device is already connected. Please disconnect the current device first.")
+
+    def show_bluetooth_disconnect_dialog(self):
+        """Show the Bluetooth disconnection confirmation dialog."""
+        if self.bluetooth_connected:
+            dialog = BluetoothConnectDialog(self.ble_api, self)
+            dialog.device_selected_signal.connect(self.update_bluetooth_disconnection_status)  # Handle disconnection signal
+            dialog.show_disconnect_confirmation()  # Show the confirmation dialog
+        else:
+            # If no device is connected, show a message
+            QtWidgets.QMessageBox.information(self, "No Device Connected", 
+                                            "There is no Bluetooth device to disconnect.")
+
+    def update_bluetooth_connection_status(self, success):
+        """Update the connection status variable based on the connection result."""
+        self.is_bluetooth_connected = success  # Update the connection status
+        if success:
+            self.bluetooth_connected = True
+            print("Connected from Haptics")
+        else:
+            self.bluetooth_connected = False
+            print("Failed from Haptics")
+
+    def update_bluetooth_disconnection_status(self, success):
+        """Update the connection status variable based on the disconnection result."""
+        if success:
+            print("Entered Here")
+            self.bluetooth_connected = False  # Update the connection status
+            self.statusBar().showMessage("Bluetooth device disconnected successfully.")
+        else:
+            self.statusBar().showMessage("Bluetooth disconnection failed.")
+
     def update_pushButton_5_state(self):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
         # Check if any actuator has signals
@@ -2678,103 +3497,149 @@ class Haptics_App(QtWidgets.QMainWindow):
             initial_position = int(cm_to_pixels)  # 3 cm in pixels
             self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
             self.floating_slider.set_slider_movable(False)  # Disable slider movement
-
-
-    def update_slider_target_position(self):
-        """Update the target position for the slider based on the maximum stop time."""
-        # Find the maximum stop time across all actuators
+    
+    def calculate_total_time(self):
         max_stop_time = max(
             (signal["stop_time"] for signals in self.actuator_signals.values() for signal in signals),
             default=0
         )
-
-        # Calculate the target position of the slider based on the maximum stop time
-        if (max_stop_time != None) and (self.total_time != None):
-            self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() * (max_stop_time / self.total_time))
-
+        return max_stop_time
     
+
+    def update_slider_target_position(self):
+        """Update the target position for the slider based on the maximum stop time."""
+        max_stop_time = self.calculate_total_time()
+
+        # Calculate the target position in pixels based on the max stop time and total time
+        if max_stop_time and self.total_time:
+            dpi = self.logicalDpiX()
+            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
+
+            # Calculate the target position based on the time ratio
+            self.slider_target_pos = int(adjusted_width * (max_stop_time / self.total_time) + cm_to_pixels)
+
     def toggle_slider_movement(self):
         """Toggle slider movement and switch button icons."""
         if self.slider_moving:
             self.pause_slider_movement()
+            self.haptic_manager.stop_playback()
         else:
             self.start_slider_movement()
+            self.haptic_manager.start_playback()
 
     def start_slider_movement(self):
-        """Start moving the slider from its current position to the target position."""
-        # Do not reset the position; just start moving from the current position
+        """Start moving the slider based on the signal's total time."""
         current_position = self.floating_slider.x()
-    
-        # Ensure the slider starts moving towards the target position
-        if current_position == self.slider_target_pos:
-            dpi = self.logicalDpiX()  # Get the screen DPI
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-            initial_position = int(cm_to_pixels)  # 3 cm in pixels
-            self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
 
-        self.slider_target_pos = self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width()
+        # Set the target position based on time
+        dpi = self.logicalDpiX()
+        cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+        self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width() - cm_to_pixels)
+
+        # Ensure the slider doesn't move backward
+        if current_position >= self.slider_target_pos:
+            # Reset to the initial position
+            self.floating_slider.move(int(cm_to_pixels), self.floating_slider.y())
+
+        # Start the slider thread
+        if self.slider_thread is None or not self.slider_thread.isRunning():
+            total_time = self.calculate_total_time()
+            self.slider_thread = SliderThread(total_time=total_time)
+            self.slider_thread.slider_moved.connect(self.move_slider)
+            self.slider_thread.start()
+
         self.slider_moving = True
-        self.slider_timer.start(10)
-        self.pushButton_5.setIcon(self.pause_icon)  # Switch to Pause icon
+        self.pushButton_5.setIcon(self.pause_icon)
 
     def pause_slider_movement(self):
         """Pause the slider movement."""
-        self.slider_timer.stop()
+        if self.slider_thread:
+            self.slider_thread.stop()
         self.slider_moving = False
         self.pushButton_5.setIcon(self.run_icon)  # Switch back to Run icon
 
+    # def move_slider(self, new_time_position):
+        """Move the slider incrementally based on the signal's total time."""
+        # Calculate the width of the movable area for the slider
+        dpi = self.logicalDpiX()
+        cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+        adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
+
+        total_time = self.calculate_total_time()
+
+        # Calculate the new slider position based on the new time position
+        new_pos = (new_time_position / total_time) * adjusted_width + cm_to_pixels
+
+        # Move the slider to the new position
+        self.floating_slider.move(int(new_pos), self.floating_slider.y())
+
+        # Update actuators and signals based on the new time position
+        current_amplitudes, current_signals = self.update_current_amplitudes(new_time_position)
+        self.actuator_canvas.highlight_actuators_at_time(new_time_position)
+
+        if new_time_position >= total_time:
+            # Stop the thread and slider movement
+            self.pause_slider_movement()
+            self.haptic_manager.end_of_slider()
+
+        # Update the haptic manager with the new signal information
+        self.haptic_manager.update(current_amplitudes, current_signals)
+
+    def calculate_total_time(self):
+        all_stop_times = []
+        for signals in self.actuator_signals.values():
+            all_stop_times.extend([signal["stop_time"] for signal in signals])
+        return max(all_stop_times) if all_stop_times else 0
 
     def move_slider(self):
-        """Move the slider incrementally towards the target position."""
+        """Move the slider incrementally based on the signal's total time."""
         if self.slider_moving:
-            current_pos = self.floating_slider.x()
-            new_pos = min(current_pos + self.slider_step, self.slider_target_pos)
-
-            # Move the slider to the new position
-            self.floating_slider.move(new_pos, self.floating_slider.y())
-
-            # Calculate the 3 cm in pixels
+            # Calculate the width of the movable area for the slider
             dpi = self.logicalDpiX()
-            cm_to_pixels = (3 / 2.54) * dpi
+            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
+            
+            # Calculate the total time of all signals
+            total_time = self.calculate_total_time()
 
-            # Adjust the width by subtracting 3 cm
-            adjusted_width = self.ui.scrollAreaWidgetContents.width() - cm_to_pixels
-            adjusted_new_pos = new_pos - cm_to_pixels
+            # Ensure total_time is valid
+            if total_time > 0:
+                # Calculate the current time based on the slider's position
+                current_pos = self.floating_slider.x() - cm_to_pixels
+                time_position = (current_pos / adjusted_width) * total_time
 
+                # Calculate the time increment step
+                time_step = (self.slider_step / adjusted_width) * total_time
+                
+                # Increment the time position
+                new_time_position = time_position + time_step
+                
+                # Calculate the new slider position based on the new time position
+                new_pos = (new_time_position / total_time) * adjusted_width + cm_to_pixels
 
-            # Convert slider position to time and update the actuator highlights
-            # Find the global largest stop time across all actuators
-            all_stop_times = []
-            for signals in self.actuator_signals.values():
-                all_stop_times.extend([signal["stop_time"] for signal in signals])
-
-            if all_stop_times:
-                self.global_total_time = max(all_stop_times)
+                # Move the slider to the new position
+                self.floating_slider.move(int(new_pos), self.floating_slider.y())
+                
+                # Highlight actuators and update signals based on the new time position
+                current_amplitudes, current_signals = self.update_current_amplitudes(new_time_position)
+                self.actuator_canvas.highlight_actuators_at_time(new_time_position)
             else:
-                print("Warning: Total time is not set or invalid.")
-
-            if self.global_total_time is not None and self.global_total_time > 0:
-                time_position = (adjusted_new_pos / adjusted_width) * self.global_total_time
-                self.actuator_canvas.highlight_actuators_at_time(time_position)
-            else:
-                print("Warning: Total time is not set or invalid.~")
+                print("Warning: No signals found or invalid total time.")
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
                 return
 
-            # Check if the slider has reached or exceeded the target position
-            if new_pos >= self.slider_target_pos:
-                # Stop the timer and set the slider_moving to False
+            # Stop the slider when it reaches the target position
+            if new_time_position >= total_time:
                 self.slider_timer.stop()
                 self.slider_moving = False
-                # Change the button icon to the run icon
-          
                 self.pushButton_5.setIcon(self.run_icon)
+                self.haptic_manager.end_of_slider()
 
-
-
-
+            # Update the haptic manager with the new signal information
+            self.haptic_manager.update(current_amplitudes, current_signals)
 
     def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
@@ -2786,6 +3651,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add a vertical slider to float over the timeline layout
         self.floating_slider = FloatingVerticalSlider(self.slider_layer, app_reference=self)
         self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
+        self.floating_slider.update_movable_range()
 
         # Set the initial position 3 cm away from the left edge
         dpi = self.logicalDpiX()  # Get the screen DPI
@@ -2812,8 +3678,51 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.raise_slider_layer()  # Ensure the slider layer stays on top after resizing
         return super(Haptics_App, self).eventFilter(source, event)
 
+
+
+    def update_current_amplitudes(self, time_position):
+        # Tracing the low frequency data
+
+        self.current_amplitudes.clear()
+        current_signals = {}  # New variable to store full signal details for comparison
+
+        for actuator_id, signals in self.actuator_signals.items():
+            for signal in signals:
+                if signal["start_time"] <= time_position <= signal["stop_time"]:
+                    signal_duration = signal["stop_time"] - signal["start_time"]
+                    relative_position = (time_position - signal["start_time"]) / signal_duration
+                    index = int(relative_position * len(signal["low_freq"]))
+                    
+                    # Ensure index is within bounds
+                    index = max(0, min(index, len(signal["low_freq"]) - 1))
+                    
+                    amplitude = signal["low_freq"][index]
+                    frequency = signal["high_freq"][index]
+                    
+                    # Update current_amplitudes with only the amplitude and frequency
+                    self.current_amplitudes[actuator_id] = {
+                        "current_amplitude": amplitude,
+                        "current_frequency": frequency,
+                        "parameters": signal.get("parameters", {})
+                    }
+
+                    # Update current_signals with the full signal details for comparison
+                    current_signals[actuator_id] = {
+                        "type": signal["type"],
+                        "start_time": signal["start_time"],
+                        "stop_time": signal["stop_time"],
+                        "data": signal["data"],
+                        "high_freq": signal['high_freq'],
+                        "low_freq": signal['low_freq'],
+                        "parameters": signal.get("parameters", {})
+                    }
+
+                    break  # Only handle one signal per actuator at a time
+
+        # Return both the current_amplitudes and current_signals
+        return self.current_amplitudes, current_signals
+
     def update_actuator_text(self):
-        
         # Find the global largest stop time across all actuators
         all_stop_times = []
         for signals in self.actuator_signals.values():
@@ -2824,14 +3733,18 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             global_total_time = 1  # Avoid division by zero in the width calculation
 
+        # Define the 3 cm left offset and 1 cm right offset in pixels
+        dpi = self.logicalDpiX()  # Get the screen DPI
+        left_offset = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+        right_offset = (3 / 2.54) * dpi  # Convert 1 cm to pixels
+
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
 
                 # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
-                # Assuming the first widget in the layout is the actuator label (ID and type)
-                for i in reversed(range(1, actuator_widget.layout().count())):  # Start from index 1 to avoid removing the ID label
+                for i in reversed(range(1, actuator_widget.layout().count())):
                     item = actuator_widget.layout().takeAt(i)
                     widget = item.widget()
                     if widget:
@@ -2848,18 +3761,18 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Ensure the ID/Type label stays in the first position
                 if actuator_label.parent() is None:
-                    actuator_widget.layout().insertWidget(0, actuator_label)  # Add ID/Type label at the beginning
+                    actuator_widget.layout().insertWidget(0, actuator_label)
 
                 # Create a container for the timeline and signal widgets
                 timeline_container = QtWidgets.QWidget(actuator_widget)
                 timeline_container.setStyleSheet("background-color: transparent;")
-                timeline_container.setFixedHeight(30)  # Slightly taller than the signal widgets to create the layering effect
+                timeline_container.setFixedHeight(30)
                 timeline_layout = QtWidgets.QHBoxLayout(timeline_container)
                 timeline_layout.setContentsMargins(0, 0, 0, 0)
                 timeline_layout.setSpacing(0)
 
-                # Calculate the width of the actuator widget based on the global total time
-                widget_width = actuator_widget.size().width()
+                # Calculate the available width of the actuator widget after applying the offsets
+                widget_width = actuator_widget.size().width() - left_offset - right_offset  # Subtract both offsets
 
                 # Track the last stop time to insert gaps
                 last_stop_time = 0
@@ -2875,7 +3788,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                     # Calculate the relative starting position of the signal widget
                     signal_start_ratio = signal["start_time"] / global_total_time
-                    signal_start_position = int(signal_start_ratio * widget_width)
+                    signal_start_position = int(signal_start_ratio * widget_width) + left_offset  # Add the 3 cm offset
 
                     # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
                     if signal["start_time"] > last_stop_time:
@@ -2910,22 +3823,21 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
+                timeline_container.updateGeometry()
 
         # After adding all timeline widgets, ensure the slider layer stays on top
         self.raise_slider_layer()
-                
-   
+
+                  
     def connect_actuator_signals(self, actuator_id, actuator_type, color, x, y):
         actuator = self.actuator_canvas.get_actuator_by_id(actuator_id)
         if actuator:
             actuator.signal_handler.clicked.connect(self.on_actuator_clicked)
             actuator.signal_handler.properties_changed.connect(self.update_plotter)
 
-
     def update_plotter(self, actuator_id, actuator_type, color):
         if self.current_actuator == actuator_id:
             self.switch_to_timeline_canvas(actuator_id)  # Update the plotter to reflect changes
-
 
     def switch_to_timeline_canvas(self, actuator_id):
         # Clear the current layout
@@ -3030,7 +3942,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.reset_color_management()
             self.switch_to_main_canvas()
 
-
     def clear_timeline_canvas(self):
         # Clear the timeline layout
         while self.timeline_layout.count() > 0:
@@ -3057,8 +3968,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
-
-
     def add_actuator_to_timeline(self, new_id, actuator_type, color, x, y):
         # Convert the color to a suitable format for the stylesheet
         color_rgb = QColor(color).getRgbF()[:3]
@@ -3105,10 +4014,6 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Immediately update the plotter to reflect the changes
             self.update_plotter(new_actuator_id, actuator_type, color)
-
-
-
-   
             
     def remove_actuator_from_timeline(self, actuator_id):
         if actuator_id in self.timeline_widgets:
@@ -3121,25 +4026,118 @@ class Haptics_App(QtWidgets.QMainWindow):
         if actuator_id in self.actuator_signals:
             del self.actuator_signals[actuator_id]
 
-
     def import_waveform(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "JSON Files (*.json);;All Files (*)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Waveform", "", "CSV Files (*.csv);;All Files (*)")
         if file_path:
             try:
-                with open(file_path, 'r') as file:
-                    data = json.load(file)
-                    print(f"JSON Data: {json.dumps(data, indent=2)}")  # Debugging print statement
-                    # Assuming the waveform data is under 'value0' and is a list of y-values
-                    waveform = self.extract_waveform(data)
-                    if waveform is not None:
-                        data["data"] = waveform
-                        self.add_imported_waveform(file_path, data)
+                # Ask the user to input the sampling rate
+                sampling_rate, ok = QInputDialog.getInt(
+                    self, 
+                    "Sampling Rate Input", 
+                    "Please enter the sampling rate (in Hz):", 
+                    min=1, 
+                    max=192000, 
+                    value=44100  # Default value
+                )
+
+                if not ok:
+                    return  # User canceled input, exit
+
+                # Read the CSV file
+                data = self.read_csv_file(file_path)
+                if sampling_rate != TIME_STAMP:
+                    current_signal_length = len(data)
+                    resample_factor = sampling_rate / TIME_STAMP
+                    data = np.interp(
+                        np.linspace(0, current_signal_length, int(current_signal_length / resample_factor)),
+                        np.arange(0, current_signal_length),
+                        data
+                    )
+                    sampling_rate = TIME_STAMP
+                print(f"CSV Data: {data}")  # Debugging print statement
+
+                # Extract the signal type from the CSV filename
+                signal_type = os.path.splitext(os.path.basename(file_path))[0]
+                print(f"Signal Type: {signal_type}")  # Debugging print statement
+                print("data length", len(data))
+                # Convert CSV data to the required format with the max value as gain
+                waveform_data = self.convert_csv_to_waveform_format(data, signal_type, sampling_rate)
+
+                if waveform_data:
+                    self.add_imported_waveform(file_path, waveform_data)
+
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to import waveform: {e}")
 
+    def read_csv_file(self, file_path):
+        """
+        Reads a CSV file and converts it to a list of rows.
+        Each row is considered a data point corresponding to a timestamp.
+        """
+        with open(file_path, 'r') as csv_file:
+            reader = csv.reader(csv_file)
+            return [float(row[0]) for row in reader]  # Convert each row to float
+
+    def convert_csv_to_waveform_format(self, csv_data, signal_type, sampling_rate):
+        """
+        Converts the CSV data into the specified JSON format for waveforms.
+        The signal type is derived from the CSV filename.
+        The gain is the maximum value out of all data numbers in the CSV.
+        """
+        try:
+            # Flatten the CSV data to find the maximum value
+            amplitude = max(csv_data)  # Set the gain as the maximum value in the CSV
+            print(f"Max Amplitude (Gain): {amplitude}")  # Debugging print statement
+
+
+            # Convert the CSV data to the format you described
+            waveform_format = {
+                "value0": {
+                    "gain": amplitude,
+                    "bias": 0.0,
+                    "sampling_rate": sampling_rate,
+                    "m_ptr": {
+                        "polymorphic_id": 2147483649,
+                        "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
+                        "ptr_wrapper": {
+                            "valid": 1,
+                            "data": {
+                                "Concept": {},
+                                "m_model": {
+                                    "IOscillator": {
+                                        "x": {
+                                            "gain": 1.0,
+                                            "bias": 0.0,
+                                            "m_ptr": {
+                                                "polymorphic_id": 2147483650,
+                                                "polymorphic_name": "tact::Signal::Model<tact::Time>",
+                                                "ptr_wrapper": {
+                                                    "valid": 1,
+                                                    "data": {
+                                                        "Concept": {},
+                                                        "m_model": {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "data": csv_data  # CSV data as a list of rows
+            }
+
+            return waveform_format
+
+        except Exception as e:
+            print(f"Error while converting CSV to waveform format: {e}")
+            return None
+
     def add_imported_waveform(self, file_path, waveform_data):
         imports_item = None
-        # Find or create the Imports item
+        # Find or create the Imports item in the tree widget
         for i in range(self.ui.treeWidget.topLevelItemCount()):
             top_item = self.ui.treeWidget.topLevelItem(i)
             if top_item.text(0) == "Imported Signals":
@@ -3157,89 +4155,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.imported_signals[waveform_name] = waveform_data
         child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)  # Make the item editable
         child.setData(0, QtCore.Qt.ItemDataRole.UserRole, waveform_name)  # Store the original name
-
-    def generate_imported_waveform(self, data, sampling_rate=2345):
-        current_level = data.get('value0', {})
-        gain = current_level.get('gain', 1.0)
-        print("gain",gain)
-        bias = current_level.get('bias', 0.0)
-        print("bias",bias)
-        waveform_type = current_level.get('m_ptr', {}).get('polymorphic_name', '')
-        print("waveform_type",waveform_type)
-        t = np.linspace(0, 1, sampling_rate)
-        oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
-        x_component = oscillator.get('x', {})
-        frequency = x_component.get('gain', 1.0) /(2*np.pi)
-        print("frequency",frequency)
-        x_bias = x_component.get('bias', 0.0)
-   
-
-        if waveform_type == "tact::Signal::Model<tact::Sine>":
-            waveform = (gain * np.sin(2*np.pi*frequency * t + x_bias) + bias).tolist()
-
-        elif waveform_type == "tact::Signal::Model<tact::Square>":
-       
-            waveform = (gain * np.sign(np.sin(2 * np.pi * frequency * t + x_bias)) + bias).tolist()
-
-        elif waveform_type == "tact::Signal::Model<tact::Triangle>":
-            waveform = (gain * (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1) + bias).tolist()  # 0.5 gives a triangle wave
-
-        elif waveform_type == "tact::Signal::Model<tact::Saw>":
-            waveform = (gain * (2 * (t * frequency - np.floor(t * frequency + 0.5))) + bias).tolist()
-
-        # elif waveform_type == "tact::Signal::Model<tact::Chirp>":
-        #     # Extract frequency modulation parameters
-        #     lhs = x_component.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOperator', {}).get('lhs', {})
-        #     f0 = lhs.get('gain', 314.1592653589793) / (2 * np.pi)  # Start frequency in Hz
-        #     chirp_rate = lhs.get('bias', 628.3185307179587) / (2 * np.pi)  # Chirp rate in Hz/s
-        #     print("lhs",lhs)
-        #     print("f0",f0)
-        #     print("chirp_rate",chirp_rate)
-        #     # Calculate the end frequency based on chirp rate
-        #     f1 = f0 + chirp_rate * t[-1]
-            
-        #     # Generate the chirp waveform
-        #     waveform = (gain * signal.chirp(t, f0=f0, f1=f1, t1=t[-1], method='linear') + bias).tolist()
-  
-
-        # elif waveform_type == "tact::Signal::Model<tact::FM>":
-        #     oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
-        #     x_component = oscillator.get('x', {})
-        #     carrier_freq = x_component.get('gain', 1.0)
-        #     mod_index = x_component.get('bias', 0.5)  # Modulation index
-        #     mod_signal = np.sin(2 * np.pi * t)  # Example modulating signal
-        #     waveform = gain * np.sin(2 * np.pi * carrier_freq * t + mod_index * mod_signal) + bias
-
-        # elif waveform_type == "tact::Signal::Model<tact::PWM>":
-        #     oscillator = current_level.get('m_ptr', {}).get('ptr_wrapper', {}).get('data', {}).get('m_model', {}).get('IOscillator', {})
-        #     x_component = oscillator.get('x', {})
-        #     frequency = x_component.get('gain', 1.0)
-        #     duty_cycle = x_component.get('bias', 0.5) * 100  # Duty cycle as percentage
-        #     waveform = gain * signal.square(frequency * t, duty=duty_cycle) + bias
-
-        elif waveform_type == "tact::Signal::Model<tact::Noise>":
-            waveform = (gain * np.random.normal(0, 1, len(t)) + bias).tolist()
-
-        else:
-            print(f"Unknown waveform type: {waveform_type}")
-            return None
-
-        return waveform
-            
-    def extract_waveform(self, data):
-        try:
-            waveform = self.generate_imported_waveform(data = data)
-
-            # print(waveform)
-            print("len_w",len(waveform))
-            
-            return waveform
-
-        except KeyError as e:
-            print(f"KeyError: {e}")
-            return None
-
-
 
     def create_actuator_branch(self):
         dialog = CreateBranchDialog(self)
@@ -3285,9 +4200,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         oscillators.setText(0, "Oscillators")
         oscillators.setToolTip(0, "Oscillators")  # Set tooltip
 
-        envelopes = QTreeWidgetItem(tree)
-        envelopes.setText(0, "Envelopes")
-        envelopes.setToolTip(0, "Envelopes")  # Set tooltip
 
         self.customizes = QTreeWidgetItem(tree)
         self.customizes.setText(0, "Customized Signals")
@@ -3301,14 +4213,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         osc_items = ["Sine", "Square", "Saw", "Triangle", "Chirp", "FM", "PWM", "Noise"]
         for item in osc_items:
             child = QTreeWidgetItem(oscillators)
-            child.setText(0, item)
-            child.setToolTip(0, item)  # Set tooltip
-            self.signal_templates[item] = self.generate_signal(item)
-
-        # Add child items to "Envelopes"
-        env_items = ["Envelope", "Keyed Envelope", "ASR", "ADSR", "Exponential Decay", "PolyBezier"]
-        for item in env_items:
-            child = QTreeWidgetItem(envelopes)
             child.setText(0, item)
             child.setToolTip(0, item)  # Set tooltip
             self.signal_templates[item] = self.generate_signal(item)
@@ -3354,7 +4258,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         else:
             self.preview_canvas.plot_default_signal(None)  # Clear the preview canvas if no valid signal is found
 
-
     def generate_signal(self, signal_type):
         base_signal = {
             "value0": {
@@ -3393,7 +4296,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             "data": []
         }
 
-        t = np.linspace(0, 1, 2345).tolist()  # Convert numpy array to list
+        t = np.linspace(0, 1, TIME_STAMP).tolist()  # Convert numpy array to list
         if signal_type == "Sine":
             base_signal["data"] = np.sin(2 * np.pi * 10 * np.array(t)).tolist()
         elif signal_type == "Square":
@@ -3402,37 +4305,26 @@ class Haptics_App(QtWidgets.QMainWindow):
             base_signal["data"] = (2 * (np.array(t) - np.floor(np.array(t) + 0.5))).tolist()
         elif signal_type == "Triangle":
             base_signal["data"] = (2 * np.abs(2 * (np.array(t) - np.floor(np.array(t) + 0.5))) - 1).tolist()
+
         elif signal_type == "Chirp":
-            base_signal["data"] = (np.sin(2 * np.pi * np.array(t)**2)).tolist()
+            instantaneous_frequency = 10 + 50 * np.array(t)
+            # Generate the sine waveform with time-varying frequency
+            base_signal["data"] = (np.sin(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)).tolist()
         elif signal_type == "FM":
-            base_signal["data"] = (np.sin(2 * np.pi * (10 * np.array(t) + np.sin(2 * np.pi * 0.5 * np.array(t))))).tolist()
+            instantaneous_phase = 2 * np.pi * 10 * np.array(t) + 2 * np.sin(2 * np.pi * 10 * np.array(t))
+            base_signal["data"] = (np.sin(instantaneous_phase)).tolist()
+
         elif signal_type == "PWM":
-            base_signal["data"] = (np.where(np.sin(2 * np.pi * 10 * np.array(t)) >= 0, 1, -1)).tolist()
+            period = 1 / 10
+            base_signal["data"]= (((np.array(t) % period) < (70 / 100) * period).astype(float)).tolist()
+    
         elif signal_type == "Noise":
             base_signal["data"] = np.random.normal(0, 1, len(t)).tolist()
-        elif signal_type == "Envelope":
-            base_signal["data"] = (np.linspace(0, 1, 2345) * np.sin(2 * np.pi * 5 * np.array(t))).tolist()
-        elif signal_type == "Keyed Envelope":
-            base_signal["data"] = (np.sin(2 * np.pi * 5 * np.array(t)) * np.exp(-3 * np.array(t))).tolist()
-        elif signal_type == "ASR":
-            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.3, np.array(t) >= 0.3], [lambda t: 3.33 * t, 1])).tolist()
-        elif signal_type == "ADSR":
-            base_signal["data"] = (np.piecewise(np.array(t), [np.array(t) < 0.1, np.array(t) < 0.2, np.array(t) < 0.5, np.array(t) < 0.7, np.array(t) >= 0.7], [lambda t: 10 * t, lambda t: 1 - 5 * (t - 0.1), 0.5, lambda t: 0.5 - 0.25 * (t - 0.5), 0.25])).tolist()
-        elif signal_type == "Exponential Decay":
-            base_signal["data"] = (np.exp(-5 * np.array(t))).tolist()
-        elif signal_type == "PolyBezier":
-            base_signal["data"] = (np.array(t)**3 - 3 * np.array(t)**2 + 3 * np.array(t)).tolist()
-        elif signal_type in self.custom_signals:  # Check if it's a custom signal
-            base_signal["data"] = self.custom_signals.get(signal_type, {"data": np.zeros_like(t).tolist()})["data"]
+
         else:
             base_signal["data"] = np.zeros_like(t).tolist()
 
         return base_signal
-
-    def add_signal(self, signal_type, combine):
-        new_signal = self.generate_signal(signal_type)
-        print(new_signal)
-        self.maincanvas.add_signal(new_signal, combine=combine)
 
     def signal_exists(self, signal):
         for existing_signal in self.custom_signals.values():
@@ -3460,6 +4352,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 "value0": {
                     "gain": 1.0,
                     "bias": 0.0,
+                    "sampling_rate": self.maincanvas.current_signal_sampling_rate,
                     "m_ptr": {
                         "polymorphic_id": 2147483649,
                         "polymorphic_name": f"tact::Signal::Model<tact::Custom>",
@@ -3505,7 +4398,6 @@ class Haptics_App(QtWidgets.QMainWindow):
                 child.setData(0, QtCore.Qt.ItemDataRole.UserRole, signal_name)  # Store the original name
                 self.customizes.addChild(child)
                 self.custom_signals[signal_name] = signal_data  # Save the signal data
-
 
     @pyqtSlot(QTreeWidgetItem, int)
     def on_tree_item_changed(self, item, column):
@@ -3558,7 +4450,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         if index != -1:
             self.customizes.takeChild(index)
 
-
 class Worker(QtCore.QRunnable):
     def __init__(self, function, *args, **kwargs):
         super().__init__()
@@ -3569,7 +4460,6 @@ class Worker(QtCore.QRunnable):
     @pyqtSlot()
     def run(self):
         self.function(*self.args, **self.kwargs)
-
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
