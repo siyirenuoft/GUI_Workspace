@@ -2926,7 +2926,7 @@ class TimelineCanvas(FigureCanvas):
 
     def plot_all_signals(self):
         # Set a variable to control which signal component to plot
-        component_to_plot = 'low_freq'  # Options: 'data', 'high_freq', 'low_freq'
+        component_to_plot = 'data'  # Options: 'data', 'high_freq', 'low_freq'
 
         if not self.signals:
             # If no signals recorded, render a default plot with 10 seconds of 0 amplitude
@@ -3445,7 +3445,8 @@ class Haptics_App(QtWidgets.QMainWindow):
     def update_bluetooth_disconnection_status(self, success):
         """Update the connection status variable based on the disconnection result."""
         if success:
-            self.is_bluetooth_connected = False  # Update the connection status
+            print("Entered Here")
+            self.bluetooth_connected = False  # Update the connection status
             self.statusBar().showMessage("Bluetooth device disconnected successfully.")
         else:
             self.statusBar().showMessage("Bluetooth disconnection failed.")
