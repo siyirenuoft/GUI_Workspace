@@ -2650,6 +2650,7 @@ class TimelineCanvas(FigureCanvas):
 
     def handle_overlap(self, new_start_time, new_stop_time, signal_type, signal_data, parameters):
         msg_box = QMessageBox(self)
+        msg_box.setStyleSheet("background-color: rgb(193, 205, 215);")
         msg_box.setWindowTitle("Time Range Overlap")
         msg_box.setText(f"The time range overlaps with an existing signal.")
         msg_box.setInformativeText("Would you like to replace the overlapping region or reset the time range of the new signal?")
@@ -3168,22 +3169,43 @@ class FloatingVerticalSlider(QSlider):
 
         # Store the initial vertical position to lock it
         self.initial_y = self.y()
+        # Set initial position or size for the slider
+        self.slider_position_ratio = 1
+
+
+    def resizeEvent(self, event):
+        """Override the resize event to adjust the slider's position when the window is resized."""
+        # Calculate the ratio of the slider's current x position to the parent's width
+        if self.parent().width() - self.left_offset - self.right_offset > 0:
+            self.slider_position_ratio = (self.x() - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
+
+        # Call the parent resizeEvent
+        super(FloatingVerticalSlider, self).resizeEvent(event)
+
+        # Now, update the movable range and slider's new position
+        self.update_movable_range()
 
     def update_movable_range(self):
-        """Recalculate the slider's movable range based on the window size."""
+        """Recalculate the slider's movable range and adjust its position based on the window size."""
         dpi = self.logicalDpiX()
         self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (3 / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (3 / 2.54) * dpi  # 1 cm in pixels
 
         # Ensure slider is within new bounds after resizing
-        max_x = int(self.parent().width() - self.width() - self.right_offset)  # Cast to int
-        min_x = int(self.left_offset)  # Cast to int
+        max_x = int(self.parent().width() - self.width() - self.right_offset)
+        min_x = int(self.left_offset)
 
-        current_x = self.x()
-        new_x = max(min_x, min(current_x, max_x))
-        
-        # Reposition slider based on new boundaries, cast to int
-        self.move(int(new_x), int(self.y()))  # Ensure both x and y positions are integers
+        # Calculate new slider position based on its previous ratio
+        if hasattr(self, 'slider_position_ratio'):
+            new_x = min_x + int(self.slider_position_ratio * (self.parent().width() - self.left_offset - self.right_offset))
+        else:
+            new_x = min_x  # Default to the minimum position if no previous ratio
+
+        # Ensure the new_x stays within the movable range
+        new_x = max(min_x, min(new_x, max_x))
+
+        # Reposition the slider
+        self.move(new_x, self.y())
 
     def set_slider_movable(self, movable):
         """Set whether the slider is movable horizontally."""
@@ -3221,18 +3243,18 @@ class FloatingVerticalSlider(QSlider):
                 self.app_reference.update_current_amplitudes(time_position)
                 self.app_reference.current_time_position = time_position  # Update the current time position
 
-        def update_actuator_highlight(self, slider_position):
-            # Adjust for left and right offsets
-            adjusted_width = self.parent().width() - self.left_offset - self.right_offset
-            new_pos = slider_position - self.left_offset
-            
-            total_time = self.app_reference.calculate_total_time()
-            if total_time > 0:
-                time_position = (new_pos / adjusted_width) * total_time
-                self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
-                self.app_reference.update_current_amplitudes(time_position)
-            else:
-                print("Warning: No signals found or invalid total time.")   
+    def update_actuator_highlight(self, slider_position):
+        # Adjust for left and right offsets
+        adjusted_width = self.parent().width() - self.left_offset - self.right_offset
+        new_pos = slider_position - self.left_offset
+        
+        total_time = self.app_reference.calculate_total_time()
+        if total_time > 0:
+            time_position = (new_pos / adjusted_width) * total_time
+            self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
+            self.app_reference.update_current_amplitudes(time_position)
+        else:
+            print("Warning: No signals found or invalid total time.")   
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -3477,13 +3499,6 @@ class Haptics_App(QtWidgets.QMainWindow):
             initial_position = int(cm_to_pixels)  # 3 cm in pixels
             self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
             self.floating_slider.set_slider_movable(False)  # Disable slider movement
-    
-    def calculate_total_time(self):
-        max_stop_time = max(
-            (signal["stop_time"] for signals in self.actuator_signals.values() for signal in signals),
-            default=0
-        )
-        return max_stop_time
     
 
     def update_slider_target_position(self):
@@ -3763,6 +3778,16 @@ class Haptics_App(QtWidgets.QMainWindow):
                 timeline_container.updateGeometry()
 
         # After adding all timeline widgets, ensure the slider layer stays on top
+        self.raise_slider_layer()
+
+    def resizeEvent(self, event):
+        """Override the resize event to update the timeline and slider when the window size changes."""
+        super().resizeEvent(event)
+        
+        # Recalculate positions of timeline containers
+        self.update_actuator_text()
+
+        # Ensure the slider layer stays on top after resizing
         self.raise_slider_layer()
 
                   
