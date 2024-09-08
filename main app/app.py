@@ -42,7 +42,7 @@ if platform.system() == "Darwin":  # macOS
 elif platform.system() == "Windows":  # Windows
     os_dependent_value = 2
 else:
-    os_dependent_value = 1  # Default value for other OS (Linux, etc.)
+    os_dependent_value = 2  # Default value for other OS (Linux, etc.)
 
 print(f"The OS-dependent value is: {os_dependent_value}")
 
@@ -2148,6 +2148,7 @@ class ActuatorCanvas(QGraphicsView):
         menu = QMenu()
         edit_action = menu.addAction("Edit Properties")
         delete_action = menu.addAction("Delete")
+        clear_signal_action = menu.addAction("Clear Signal")
 
         action = menu.exec(self.mapToGlobal(pos))
         if action == edit_action:
@@ -2160,6 +2161,25 @@ class ActuatorCanvas(QGraphicsView):
                         self.remove_actuator(item)
             else:
                 self.remove_actuator(actuator)
+        elif action == clear_signal_action:  # Handle clearing the signal
+            self.clear_actuator_signal(actuator)
+    
+    def clear_actuator_signal(self, actuator):
+        """Clear the corresponding signal for the actuator."""
+        actuator_id = actuator.id
+        if actuator_id in self.haptics_app.actuator_signals:
+            del self.haptics_app.actuator_signals[actuator_id]  # Remove the signal from the dictionary
+        
+        
+
+        # Update the pushButton_5 state to reflect the change in signals
+        self.haptics_app.update_pushButton_5_state()
+
+        # Redraw the actuator canvas to reflect the signal being cleared
+        self.scene.update()
+        # Immediately update the plotter by switching back to the main canvas
+        self.haptics_app.switch_to_main_canvas()
+        self.haptics_app.update_actuator_text()
 
 
     def edit_actuator_properties(self, actuator):
