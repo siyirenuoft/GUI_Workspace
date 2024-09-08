@@ -34,6 +34,18 @@ from collections import deque
 
 from signal_segmentation_api import signal_segmentation_api
 
+import platform
+
+# Check the OS and assign a value to the variable accordingly
+if platform.system() == "Darwin":  # macOS
+    os_dependent_value = 3
+elif platform.system() == "Windows":  # Windows
+    os_dependent_value = 2
+else:
+    os_dependent_value = 1  # Default value for other OS (Linux, etc.)
+
+print(f"The OS-dependent value is: {os_dependent_value}")
+
 TIME_STAMP = 44100
 
 def to_subscript(text):
@@ -3163,8 +3175,8 @@ class FloatingVerticalSlider(QSlider):
 
         # Calculate the minimum and maximum x positions (3 cm from the left edge and 1 cm from the right edge)
         dpi = self.logicalDpiX()  # Get the screen DPI
-        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (3 / 2.54) * dpi  # 1 cm in pixels
+        self.left_offset = (os_dependent_value / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (os_dependent_value / 2.54) * dpi  # 1 cm in pixels
         self.global_total_time = None
 
         # Store the initial vertical position to lock it
@@ -3188,8 +3200,8 @@ class FloatingVerticalSlider(QSlider):
     def update_movable_range(self):
         """Recalculate the slider's movable range and adjust its position based on the window size."""
         dpi = self.logicalDpiX()
-        self.left_offset = (3 / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (3 / 2.54) * dpi  # 1 cm in pixels
+        self.left_offset = (os_dependent_value / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (os_dependent_value / 2.54) * dpi  # 1 cm in pixels
 
         # Ensure slider is within new bounds after resizing
         max_x = int(self.parent().width() - self.width() - self.right_offset)
@@ -3242,6 +3254,9 @@ class FloatingVerticalSlider(QSlider):
                 time_position = total_time * (new_x - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
                 self.app_reference.update_current_amplitudes(time_position)
                 self.app_reference.current_time_position = time_position  # Update the current time position
+
+                # Update the label with the current time
+                self.app_reference.update_time_label(time_position)
 
     def update_actuator_highlight(self, slider_position):
         # Adjust for left and right offsets
@@ -3438,6 +3453,14 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.actionDisconnect_Bluetooth_Device.triggered.connect(self.show_bluetooth_disconnect_dialog)
 
         self.bluetooth_connected = False
+        self.ui.label.setText('<html>Bluetooth Status:</b> <span style="color:red;"><b>Not Connected</b></span></html>')
+
+    def update_time_label(self, current_time_position):
+        """Update the label with the current time."""
+        _translate = QtCore.QCoreApplication.translate
+        formatted_time = f"{abs(current_time_position):.3f} (s)"
+        self.label_2.setText(_translate("MainWindow", f"Current Time: {formatted_time}"))
+
 
     def show_bluetooth_connect_dialog(self):
         """Show the Bluetooth connection dialog if no device is currently connected."""
@@ -3466,9 +3489,11 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.is_bluetooth_connected = success  # Update the connection status
         if success:
             self.bluetooth_connected = True
+            self.ui.label.setText('<html>Bluetooth Status:</b> <span style="color:green;"><b>Connected</b></span></html>')
             print("Connected from Haptics")
         else:
             self.bluetooth_connected = False
+            self.ui.label.setText('<html>Bluetooth Status:</b> <span style="color:red;"><b>Not Connected</b></span></html>')
             print("Failed from Haptics")
 
     def update_bluetooth_disconnection_status(self, success):
@@ -3476,6 +3501,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         if success:
             print("Entered Here")
             self.bluetooth_connected = False  # Update the connection status
+            self.ui.label.setText('<html>Bluetooth Status:</b> <span style="color:red;"><b>Not Connected</b></span></html>')
             self.statusBar().showMessage("Bluetooth device disconnected successfully.")
         else:
             self.statusBar().showMessage("Bluetooth disconnection failed.")
@@ -3495,7 +3521,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.slider_target_pos = 0  # No movement target
             # Set the initial position 3 cm away from the left edge
             dpi = self.logicalDpiX()  # Get the screen DPI
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
             initial_position = int(cm_to_pixels)  # 3 cm in pixels
             self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
             self.floating_slider.set_slider_movable(False)  # Disable slider movement
@@ -3508,7 +3534,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Calculate the target position in pixels based on the max stop time and total time
         if max_stop_time and self.total_time:
             dpi = self.logicalDpiX()
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+            cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
 
             # Calculate the target position based on the time ratio
@@ -3530,12 +3556,17 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_timer.start(10)  # Timer interval for updating the slider position
         self.pushButton_5.setIcon(self.pause_icon)
 
+        # Disable the ActuatorCanvas during playback
+        self.actuator_canvas.setEnabled(False)
 
     def pause_slider_movement(self):
         """Pause the slider movement."""
         self.slider_timer.stop()
         self.slider_moving = False
         self.pushButton_5.setIcon(self.run_icon)  # Switch back to Run icon
+
+        # Re-enable the ActuatorCanvas when playback is paused
+        self.actuator_canvas.setEnabled(True)
 
     def calculate_total_time(self):
         all_stop_times = []
@@ -3558,12 +3589,15 @@ class Haptics_App(QtWidgets.QMainWindow):
                 # Calculate the current time position as a ratio of the elapsed time to the total time
                 self.current_time_position = min(elapsed_time, total_time)  # Ensure it doesn't exceed the total time
 
+                # Update the label with the current time
+                self.update_time_label(self.current_time_position)
+
                 # Calculate the time ratio
                 time_ratio = self.current_time_position / total_time
 
                 # Calculate the new slider position based on the time ratio
                 dpi = self.logicalDpiX()
-                cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+                cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
                 adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
                 new_pos = int(time_ratio * adjusted_width + cm_to_pixels)
 
@@ -3593,6 +3627,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Update the haptic manager with the new signal information
             self.haptic_manager.update(current_amplitudes, current_signals)
 
+
     def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
         self.slider_layer = QWidget(self.ui.scrollAreaWidgetContents)
@@ -3607,7 +3642,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Set the initial position 3 cm away from the left edge
         dpi = self.logicalDpiX()  # Get the screen DPI
-        cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+        cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
         initial_position = int(cm_to_pixels)  # 3 cm in pixels
         self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
 
@@ -3687,8 +3722,8 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Define the 3 cm left offset and 1 cm right offset in pixels
         dpi = self.logicalDpiX()  # Get the screen DPI
-        left_offset = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-        right_offset = (3 / 2.54) * dpi  # Convert 1 cm to pixels
+        left_offset = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
+        right_offset = (os_dependent_value / 2.54) * dpi  # Convert 1 cm to pixels
 
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
