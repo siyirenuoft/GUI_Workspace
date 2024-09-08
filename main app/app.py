@@ -272,11 +272,11 @@ class HapticCommandManager:
                     self.last_sent_addr = addr
                 
                 if commands_to_send:
-                    self.ble_api.send_command_list(commands_to_send)  # send the list of commands
+                    self.ble_api.send_command_list(commands_to_send)  # Send the list of commands
+                    self.last_sent_commands = commands_to_send  # Log the last sent commands
                     print(f"Sending command list at Time {current_time}: {commands_to_send}")
                 
                 self.last_send_time_dequeue = current_time
-
 
     def start_playback(self):
         self.is_playing = True
@@ -296,6 +296,7 @@ class HapticCommandManager:
         # Send STOP commands to the actuators
         if stop_commands:
             self.ble_api.send_command_list(stop_commands)  # Send the list of stop commands
+            self.last_sent_commands = stop_commands  # Log the last sent stop commands
             current_time = time.time()
             print(f"[Play Button Stopping] Sending stop command list at {current_time}: {stop_commands}")
         
@@ -370,20 +371,18 @@ class HapticCommandManager:
     def end_of_slider(self):
         self.is_playing = False
 
-        # Similar to stop_playback, but use the last sent commands if the queue is empty
+        # Use the last sent commands if the queue is empty
         stop_commands = [
-            (addr, 0, 0, 0) for addr in set(cmd[0] for cmd in self.command_queue or self.last_sent_commands)
+            {"addr": addr, "duty": 0, "freq": 0, "start_or_stop": 0} 
+            for addr in set(cmd["addr"] for cmd in self.command_queue or self.last_sent_commands)
         ]
-        #print("END OF SLIDER")
-        #print(self.command_queue)
+        
         self.command_queue.clear()
-        for cmd in stop_commands:
-            self.ble_api.send_command(*cmd)
-            print(f"[End of Slider] Sending command: Addr {cmd[0]}, Duty {cmd[1]}, Freq {cmd[2]}, Start/Stop {cmd[3]}")
-            time.sleep(self.CMD_SENDING_INTERVAL)  # Respecting the command sending frequency
+        if stop_commands:
+            self.ble_api.send_command_list(stop_commands)  # Send stop commands in a batch
+            print(f"[End of Slider] Sending stop command list: {stop_commands}")
 
-        # Clear active actuators
-        self.active_actuators.clear()
+
         
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
@@ -3215,27 +3214,25 @@ class FloatingVerticalSlider(QSlider):
 
             self.move(int(new_x), self.y())  # Cast new_x to int before passing to move()
 
-            self.update_actuator_highlight(new_x)
-
+            # Update the current time position based on the slider's new location
             total_time = self.app_reference.calculate_total_time()
             if total_time > 0:
                 time_position = total_time * (new_x - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
                 self.app_reference.update_current_amplitudes(time_position)
+                self.app_reference.current_time_position = time_position  # Update the current time position
 
-        super().mouseMoveEvent(event)
-
-    def update_actuator_highlight(self, slider_position):
-        # Adjust for left and right offsets
-        adjusted_width = self.parent().width() - self.left_offset - self.right_offset
-        new_pos = slider_position - self.left_offset
-        
-        total_time = self.app_reference.calculate_total_time()
-        if total_time > 0:
-            time_position = (new_pos / adjusted_width) * total_time
-            self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
-            self.app_reference.update_current_amplitudes(time_position)
-        else:
-            print("Warning: No signals found or invalid total time.")   
+        def update_actuator_highlight(self, slider_position):
+            # Adjust for left and right offsets
+            adjusted_width = self.parent().width() - self.left_offset - self.right_offset
+            new_pos = slider_position - self.left_offset
+            
+            total_time = self.app_reference.calculate_total_time()
+            if total_time > 0:
+                time_position = (new_pos / adjusted_width) * total_time
+                self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
+                self.app_reference.update_current_amplitudes(time_position)
+            else:
+                print("Warning: No signals found or invalid total time.")   
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -3397,6 +3394,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_timer = QTimer()
         self.slider_timer.timeout.connect(self.move_slider)
 
+        # Initialize the current time position
+        self.current_time_position = 0  
+
         # Variables to control the movement
         #self.slider_moving = False
         self.slider_step = 2  # Adjust this value to control the speed of movement
@@ -3509,8 +3509,8 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.haptic_manager.start_playback()
 
     def start_slider_movement(self):
-        """Start moving the slider based on the signal's total time in real-time."""
-        self.start_time = time.time()  # Record the start time of the slider movement
+        """Start moving the slider based on the current slider position."""
+        self.start_time = time.time() - self.current_time_position  # Adjust start time based on current slider position
         self.slider_moving = True
         self.slider_timer.start(10)  # Timer interval for updating the slider position
         self.pushButton_5.setIcon(self.pause_icon)
@@ -3534,14 +3534,17 @@ class Haptics_App(QtWidgets.QMainWindow):
             # Get the elapsed time since the slider movement started
             current_time = time.time()
             elapsed_time = current_time - self.start_time  # Calculate the real elapsed time
-
+            
             # Calculate the total time of all signals
             total_time = self.calculate_total_time()
 
             # Ensure total_time is valid
             if total_time > 0:
                 # Calculate the current time position as a ratio of the elapsed time to the total time
-                time_ratio = min(elapsed_time / total_time, 1)  # Ensure it doesn't exceed 1
+                self.current_time_position = min(elapsed_time, total_time)  # Ensure it doesn't exceed the total time
+
+                # Calculate the time ratio
+                time_ratio = self.current_time_position / total_time
 
                 # Calculate the new slider position based on the time ratio
                 dpi = self.logicalDpiX()
@@ -3553,8 +3556,8 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.floating_slider.move(int(new_pos), self.floating_slider.y())
 
                 # Highlight actuators and update signals based on the new time position
-                current_amplitudes, current_signals = self.update_current_amplitudes(elapsed_time)
-                self.actuator_canvas.highlight_actuators_at_time(elapsed_time)
+                current_amplitudes, current_signals = self.update_current_amplitudes(self.current_time_position)
+                self.actuator_canvas.highlight_actuators_at_time(self.current_time_position)
             else:
                 print("Warning: No signals found or invalid total time.")
                 self.slider_timer.stop()
@@ -3563,11 +3566,14 @@ class Haptics_App(QtWidgets.QMainWindow):
                 return
 
             # Stop the slider when it reaches the end of the total time
-            if elapsed_time >= total_time:
+            if self.current_time_position >= total_time:
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
                 self.haptic_manager.end_of_slider()
+
+                # Reset to the beginning when reaching the end
+                self.current_time_position = 0  # Reset current position to 0 for next play
 
             # Update the haptic manager with the new signal information
             self.haptic_manager.update(current_amplitudes, current_signals)
