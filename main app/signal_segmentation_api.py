@@ -54,7 +54,7 @@ class signal_segmentation_api:
         median_frequency = np.median(high_freq_signal)
         if median_frequency < threshold:
             # Set low frequency signal to the original and high frequency to zeros
-            low_freq_signal = product_signal
+            low_freq_signal = np.abs(product_signal)
             high_freq_signal = np.zeros_like(product_signal)
         else:
             # Filter out frequency components above downsample_rate/2 and IFFT back to time domain
