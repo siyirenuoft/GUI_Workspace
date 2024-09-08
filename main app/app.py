@@ -3237,7 +3237,6 @@ class FloatingVerticalSlider(QSlider):
         else:
             print("Warning: No signals found or invalid total time.")   
 
-
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -3510,21 +3509,10 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.haptic_manager.start_playback()
 
     def start_slider_movement(self):
-        """Start moving the slider based on the signal's total time."""
-        current_position = self.floating_slider.x()
-
-        # Set the target position based on time
-        dpi = self.logicalDpiX()
-        cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-        self.slider_target_pos = int(self.ui.scrollAreaWidgetContents.width() - self.floating_slider.width() - cm_to_pixels)
-
-        # Ensure the slider doesn't move backward
-        if current_position >= self.slider_target_pos:
-            # Reset to the initial position
-            self.floating_slider.move(int(cm_to_pixels), self.floating_slider.y())
-
+        """Start moving the slider based on the signal's total time in real-time."""
+        self.start_time = time.time()  # Record the start time of the slider movement
         self.slider_moving = True
-        self.slider_timer.start(10)  # The time interval is now just for incremental updates
+        self.slider_timer.start(10)  # Timer interval for updating the slider position
         self.pushButton_5.setIcon(self.pause_icon)
 
 
@@ -3541,37 +3529,32 @@ class Haptics_App(QtWidgets.QMainWindow):
         return max(all_stop_times) if all_stop_times else 0
 
     def move_slider(self):
-        """Move the slider incrementally based on the signal's total time."""
+        """Move the slider in real time based on the signal's total time."""
         if self.slider_moving:
-            # Calculate the width of the movable area for the slider
-            dpi = self.logicalDpiX()
-            cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
-            adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
-            
+            # Get the elapsed time since the slider movement started
+            current_time = time.time()
+            elapsed_time = current_time - self.start_time  # Calculate the real elapsed time
+
             # Calculate the total time of all signals
             total_time = self.calculate_total_time()
 
             # Ensure total_time is valid
             if total_time > 0:
-                # Calculate the current time based on the slider's position
-                current_pos = self.floating_slider.x() - cm_to_pixels
-                time_position = (current_pos / adjusted_width) * total_time
+                # Calculate the current time position as a ratio of the elapsed time to the total time
+                time_ratio = min(elapsed_time / total_time, 1)  # Ensure it doesn't exceed 1
 
-                # Calculate the time increment step
-                time_step = (self.slider_step / adjusted_width) * total_time
-                
-                # Increment the time position
-                new_time_position = time_position + time_step
-                
-                # Calculate the new slider position based on the new time position
-                new_pos = (new_time_position / total_time) * adjusted_width + cm_to_pixels
+                # Calculate the new slider position based on the time ratio
+                dpi = self.logicalDpiX()
+                cm_to_pixels = (3 / 2.54) * dpi  # Convert 3 cm to pixels
+                adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
+                new_pos = int(time_ratio * adjusted_width + cm_to_pixels)
 
                 # Move the slider to the new position
                 self.floating_slider.move(int(new_pos), self.floating_slider.y())
-                
+
                 # Highlight actuators and update signals based on the new time position
-                current_amplitudes, current_signals = self.update_current_amplitudes(new_time_position)
-                self.actuator_canvas.highlight_actuators_at_time(new_time_position)
+                current_amplitudes, current_signals = self.update_current_amplitudes(elapsed_time)
+                self.actuator_canvas.highlight_actuators_at_time(elapsed_time)
             else:
                 print("Warning: No signals found or invalid total time.")
                 self.slider_timer.stop()
@@ -3579,8 +3562,8 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.pushButton_5.setIcon(self.run_icon)
                 return
 
-            # Stop the slider when it reaches the target position
-            if new_time_position >= total_time:
+            # Stop the slider when it reaches the end of the total time
+            if elapsed_time >= total_time:
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
