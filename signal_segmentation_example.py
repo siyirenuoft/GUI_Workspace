@@ -22,17 +22,17 @@ import soundfile as sf
 signal, fs = sf.read(wav_filename)
 print(f'Sampling rate: {fs} Hz')
 print(f'Duration: {len(signal)/fs} seconds')
-product_signal = signal[:fs]
+product_signal = signal[:fs>>1]
 
 # Parameters
 sampling_rate = fs  # in Hz
-duration = 1  # in seconds
+duration = 0.5  # in seconds
 t = np.linspace(0, duration, int(sampling_rate * duration), endpoint=False)
 
 # Plot the product signal
 plt.figure(figsize=(10, 4))
 plt.plot(t, product_signal)
-plt.title('Product Signal of 300Hz and 10Hz Sine Waves')
+plt.title('Product Signal of 200Hz and 5Hz Sine Waves')
 plt.xlabel('Time [s]')
 plt.ylabel('Amplitude')
 plt.show()
@@ -76,7 +76,7 @@ print(max_freq)
 
 # Plot the spectrogram
 plt.figure(figsize=(10, 4))
-plt.pcolormesh(times, frequencies, np.abs(Zxx), shading='gouraud')
+plt.pcolormesh(times, frequencies, np.abs(Zxx), cmap='plasma', shading='gouraud')
 plt.ylim(0, 500)  # Focus on low frequencies
 plt.scatter(times, max_freq, color='r', s=2)
 plt.title('Spectrogram of the Product Signal')
@@ -88,13 +88,14 @@ plt.show()
 
 # Downsample the signal to 200 samples/sec
 downsample_rate = 200
-downsampled_t = np.linspace(0, duration, downsample_rate, endpoint=False)
+downsampled_t = np.linspace(0, duration, int(duration * downsample_rate), endpoint=False)
 # downsampled_signal = np.interp(downsampled_t, t, product_signal)
 print(int(sampling_rate / downsample_rate))
 downsampled_signal = product_signal[::int(sampling_rate / downsample_rate)]
 
 # Plot the downsampled signal
 plt.figure(figsize=(10, 4))
+print(len(downsampled_t), len(downsampled_signal))
 plt.stem(downsampled_t, downsampled_signal, use_line_collection=True)
 plt.title('Downsampled Signal (200 samples/sec)')
 plt.xlabel('Time [s]')
@@ -156,3 +157,24 @@ plt.xlabel('Time [s]')
 plt.ylabel('Amplitude')
 plt.show()
 
+
+
+# make a 1x3 horizontal subplots, plot the produce signal, the max_freq, and the downsampled_filtered_signal, use the same captions above
+fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+axs[0].plot(t, product_signal)
+axs[0].set_title('Waveform Composition of 200Hz and 5Hz Sine Waves')
+axs[0].set_xlabel('Time [s]')
+axs[0].set_ylabel('Amplitude')
+axs[1].pcolormesh(times, frequencies, np.abs(Zxx), cmap='plasma', shading='gouraud')
+axs[1].set_ylim(0, 500)  # Focus on low frequencies
+axs[1].scatter(times, max_freq, color='r', s=2)
+axs[1].set_title('STFT Spectrogram of the Waveform')
+axs[1].set_ylabel('Frequency [Hz]')
+axs[1].set_xlabel('Time [s]')
+# axs[1].colorbar(label='Magnitude')
+axs[2].plot(t, filtered_signal)
+axs[2].plot(downsampled_t, downsampled_filtered_signal, 'o')
+axs[2].set_title('Waveform Envelope with Downsampled Points')
+axs[2].set_xlabel('Time [s]')
+axs[2].set_ylabel('Amplitude')
+plt.show()
