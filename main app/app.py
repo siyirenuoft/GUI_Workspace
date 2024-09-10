@@ -2170,13 +2170,12 @@ class ActuatorCanvas(QGraphicsView):
         if actuator_id in self.haptics_app.actuator_signals:
             del self.haptics_app.actuator_signals[actuator_id]  # Remove the signal from the dictionary
         
-        
 
         # Update the pushButton_5 state to reflect the change in signals
         self.haptics_app.update_pushButton_5_state()
 
-        # Redraw the actuator canvas to reflect the signal being cleared
-        self.scene.update()
+        # # Redraw the actuator canvas to reflect the signal being cleared
+        # self.scene.update()
         # Immediately update the plotter by switching back to the main canvas
         self.haptics_app.switch_to_main_canvas()
         self.haptics_app.update_actuator_text()
@@ -3455,7 +3454,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.current_time_position = 0  
 
         # Variables to control the movement
-        #self.slider_moving = False
         self.slider_step = 2  # Adjust this value to control the speed of movement
         self.slider_target_pos = 0
 
@@ -3474,6 +3472,13 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         self.bluetooth_connected = False
         self.ui.label.setText('<html>Bluetooth Status:</b> <span style="color:red;"><b>Not Connected</b></span></html>')
+        
+        
+        self.ui.label.setStyleSheet("background-color: rgb(184, 199, 209);")
+        self.ui.label_2.setStyleSheet("background-color: rgb(184, 199, 209);")
+        self.ui.label_3.setStyleSheet("background-color: rgb(184, 199, 209);")
+        self.ui.label_4.setStyleSheet("background-color: rgb(184, 199, 209);")
+        
 
     def update_time_label(self, current_time_position):
         """Update the label with the current time."""
@@ -3575,8 +3580,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_moving = True
         self.slider_timer.start(10)  # Timer interval for updating the slider position
         self.pushButton_5.setIcon(self.pause_icon)
-
-        # Disable the ActuatorCanvas during playback
         self.actuator_canvas.setEnabled(False)
 
     def pause_slider_movement(self):
@@ -3584,8 +3587,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_timer.stop()
         self.slider_moving = False
         self.pushButton_5.setIcon(self.run_icon)  # Switch back to Run icon
-
-        # Re-enable the ActuatorCanvas when playback is paused
         self.actuator_canvas.setEnabled(True)
 
     def calculate_total_time(self):
@@ -3632,6 +3633,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
+                self.actuator_canvas.setEnabled(True)
                 return
 
             # Stop the slider when it reaches the end of the total time
@@ -3639,6 +3641,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.slider_timer.stop()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
+                self.actuator_canvas.setEnabled(True)
                 self.haptic_manager.end_of_slider()
 
                 # Reset to the beginning when reaching the end
@@ -3732,6 +3735,7 @@ class Haptics_App(QtWidgets.QMainWindow):
     def update_actuator_text(self):
         # Find the global largest stop time across all actuators
         all_stop_times = []
+        # print("!!!!!",self.actuator_signals)  
         for signals in self.actuator_signals.values():
             all_stop_times.extend([signal["stop_time"] for signal in signals])
 
