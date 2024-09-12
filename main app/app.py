@@ -1,34 +1,27 @@
 import sys
 import os
-import queue
 import matplotlib
 import numpy as np
-import pandas as pd
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as Navi
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from matplotlib.pyplot import scatter
-import matplotlib.ticker as ticker
 import random
-from PyQt6 import QtCore, QtWidgets, QtGui, QtMultimedia
+from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6 import uic
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
-from datetime import date, datetime
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
-import json
 import pickle
 import csv
 from scipy import signal
 
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
-from PyQt6.QtCore import Qt, pyqtSlot, QPoint
-from PyQt6.QtGui import QPen, QColor, QBrush, QFont
+from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtGui import QPen, QColor, QBrush
 from PyQt6.QtCore import pyqtSignal
 
 from python_ble_api import python_ble_api
-import math
 import time
 from collections import deque
 
@@ -229,7 +222,7 @@ class HapticCommandManager:
         self.active_actuators = set()
 
         self.last_sent_commands = [] # for the end of the slider use
-        self.active_signals = {}  # New variable to track currently playing signals
+        self.active_signals = {}  
 
 
     def detect_leaving_edges(self, current_amplitudes):
@@ -349,8 +342,6 @@ class HapticCommandManager:
                 print(f"  Stop Time: {signal_details['stop_time']}")
                 print(f"  Full Data Length: {len(signal_details['data'])}")
                 
-                
-                # Print the frequency from high_freq if available
 
                 # Print the frequency from high_freq if available
                 if "high_freq" in signal_details:
@@ -541,8 +532,8 @@ class DesignSaver:
                 'start_time': signal["start_time"],
                 'stop_time': signal["stop_time"],
                 'data': signal["data"],  # Original signal data
-                'high_freq': signal.get("high_freq", None),  # New high frequency data
-                'low_freq': signal.get("low_freq", None),    # New low frequency data
+                'high_freq': signal.get("high_freq", None),  # high frequency data
+                'low_freq': signal.get("low_freq", None),    # low frequency data
                 'parameters': signal["parameters"]
             } for signal in timeline_canvas.signals])
         return timeline_data
@@ -697,8 +688,6 @@ class MplCanvas(FigureCanvas):
             overall_t = len(self.current_signal) / TIME_STAMP
  
         t = np.linspace(0, overall_t, int(overall_t * TIME_STAMP))  # Generate t based on TIME_STAMP
-
-
 
         # Plot the resampled signal
         self.plot(t, self.current_signal)
@@ -1431,7 +1420,7 @@ ACTUATOR_CONFIG = {
         "min_font_size": 6,
         "max_font_size": 12
     },
-    "M": {
+    "M  ": {
         "text_vertical_offset": -0.8,
         "text_horizontal_offset": 0.25,
         "font_size_factor": 0.9,
@@ -1482,7 +1471,6 @@ class ActuatorSignalHandler(QObject):
         self.actuator_id = actuator_id
 
 class Actuator(QGraphicsItem):
-    # properties_changed = pyqtSignal(str, str, str)  # Signal to indicate properties change: id, type, color
     def __init__(self, x, y, size, color, actuator_type, id, predecessor=None, successor=None):
         super().__init__()
         self.setPos(x, y)
@@ -1545,7 +1533,7 @@ class Actuator(QGraphicsItem):
             painter.drawEllipse(self.boundingRect())
         elif self.actuator_type == "VCA":
             painter.drawRect(self.boundingRect())
-        else:  # "M"
+        else:  # "M  "
             painter.drawRoundedRect(self.boundingRect(), 5, 5)
 
         # Now, only draw the highlight rim if the item is selected
@@ -1558,7 +1546,7 @@ class Actuator(QGraphicsItem):
                 painter.drawEllipse(self.boundingRect().adjusted(-2, -2, 2, 2))  # Slightly larger for the rim
             elif self.actuator_type == "VCA":
                 painter.drawRect(self.boundingRect().adjusted(-2, -2, 2, 2))
-            else:  # "M"
+            else:  # "M  "
                 painter.drawRoundedRect(self.boundingRect().adjusted(-2, -2, 2, 2), 5, 5)
 
         # Set font size
@@ -1673,7 +1661,7 @@ class ActuatorPropertiesDialog(QDialog):
         self.type_group = QButtonGroup(self)
         self.lra_radio = QRadioButton("LRA")
         self.vca_radio = QRadioButton("VCA")
-        self.m_radio = QRadioButton("M")
+        self.m_radio = QRadioButton("M  ")
         self.type_group.addButton(self.lra_radio)
         self.type_group.addButton(self.vca_radio)
         self.type_group.addButton(self.m_radio)
@@ -1709,7 +1697,7 @@ class ActuatorPropertiesDialog(QDialog):
         elif self.vca_radio.isChecked():
             return "VCA"
         else:
-            return "M"
+            return "M  "
 
 class SelectionBar(QGraphicsItem):
     def __init__(self, scene, parent=None):
@@ -1722,7 +1710,7 @@ class SelectionBar(QGraphicsItem):
         self.create_selection_icons()
 
     def create_selection_icons(self):
-        actuator_types = ["LRA", "VCA", "M"]
+        actuator_types = ["LRA", "VCA", "M  "]
         for i, act_type in enumerate(actuator_types):
             icon = Actuator(0, 0, 20, QColor(240, 235, 229), act_type, act_type)
             icon.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
@@ -1819,11 +1807,6 @@ class ActuatorCanvas(QGraphicsView):
 
         # Iterate through all actuators and draw lines when both conditions are met
         for actuator in self.actuators:
-            # Check if an actuator's predecessor and successor are the same
-            #if (actuator.predecessor == actuator.successor) and (actuator.predecessor is not None):
-            #    self.generate_same_predecessor_successor_warning(actuator.id)
-            #    continue  # Skip drawing the line for this actuator
-
             # Check for topology conflicts
             if actuator.predecessor:
                 predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
@@ -2037,9 +2020,6 @@ class ActuatorCanvas(QGraphicsView):
                 self.no_actuator_selected.emit()
             super().mousePressEvent(event)
 
-
-
-
     def mouseMoveEvent(self, event):
         if self.panning:
             delta = event.pos() - self.last_pan_point
@@ -2049,8 +2029,6 @@ class ActuatorCanvas(QGraphicsView):
             event.accept()
         else:
             super().mouseMoveEvent(event)
-
-
 
     def mouseReleaseEvent(self, event):
         if self.panning:
@@ -2069,12 +2047,10 @@ class ActuatorCanvas(QGraphicsView):
         else:
             super().mouseReleaseEvent(event)
 
-
     def update_dragging_item(self, event):
         if hasattr(self, 'dragging_actuator') and self.dragging_actuator:
             pos = self.mapToScene(event.pos())
             self.dragging_actuator.setPos(pos.x(), pos.y())
-
 
     def start_dragging_item(self, event):
         item = self.dragging_item
@@ -2119,7 +2095,6 @@ class ActuatorCanvas(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
-
 
     def generate_next_id(self):
         if not self.actuators:
@@ -2169,13 +2144,10 @@ class ActuatorCanvas(QGraphicsView):
         actuator_id = actuator.id
         if actuator_id in self.haptics_app.actuator_signals:
             del self.haptics_app.actuator_signals[actuator_id]  # Remove the signal from the dictionary
-        
 
         # Update the pushButton_5 state to reflect the change in signals
         self.haptics_app.update_pushButton_5_state()
 
-        # # Redraw the actuator canvas to reflect the signal being cleared
-        # self.scene.update()
         # Immediately update the plotter by switching back to the main canvas
         self.haptics_app.switch_to_main_canvas()
         self.haptics_app.update_actuator_text()
@@ -2258,7 +2230,6 @@ class ActuatorCanvas(QGraphicsView):
                 break  # Exit if the dialog is canceled
 
 
-
     def update_related_actuators(self, old_id, new_id):
         for act in self.actuators:
             if act.predecessor == old_id:
@@ -2293,9 +2264,6 @@ class ActuatorCanvas(QGraphicsView):
                 successor_actuator.predecessor = None
                 successor_actuator.update()
 
-        # Ensure that both predecessors and successors are unique after deletion
-        #self.ensure_unique_connections()
-
         # Remove the actuator from the scene
         self.actuators.remove(actuator)
         self.scene.removeItem(actuator)
@@ -2304,27 +2272,6 @@ class ActuatorCanvas(QGraphicsView):
         # Redraw all lines after deletion
         self.redraw_all_lines()       
         self.haptics_app.update_pushButton_5_state()
-
-
-    # def ensure_unique_connections(self):
-    #     """Ensure all actuators have unique predecessors and successors."""
-    #     seen_predecessors = set()
-    #     seen_successors = set()
-
-    #     for actuator in self.actuators:
-    #         if actuator.predecessor in seen_predecessors:
-    #             actuator.predecessor = None  # Clear the duplicate predecessor
-    #             actuator.update()
-
-    #         if actuator.successor in seen_successors:
-    #             actuator.successor = None  # Clear the duplicate successor
-    #             actuator.update()
-
-    #         # Track unique predecessors and successors
-    #         if actuator.predecessor:
-    #             seen_predecessors.add(actuator.predecessor)
-    #         if actuator.successor:
-    #             seen_successors.add(actuator.successor)
 
     def set_canvas_size(self, width, height):
         self.canvas_rect = QRectF(0, 0, width, height)
@@ -2402,7 +2349,6 @@ class ActuatorCanvas(QGraphicsView):
             signals = self.haptics_app.actuator_signals.get(actuator.id, [])
             is_active = any(signal["start_time"] <= time_position <= signal["stop_time"] for signal in signals)
             if is_active:
-                # print("here!!!!")
                 actuator.setSelected(True)  # Highlight the actuator
             else:
                 actuator.setSelected(False)  # Remove highlight
@@ -2445,7 +2391,7 @@ class ActuatorPropertiesDialog(QDialog):
         self.type_group = QButtonGroup(self)
         self.lra_radio = QRadioButton("LRA")
         self.vca_radio = QRadioButton("VCA")
-        self.m_radio = QRadioButton("M")
+        self.m_radio = QRadioButton("M  ")
         self.type_group.addButton(self.lra_radio)
         self.type_group.addButton(self.vca_radio)
         self.type_group.addButton(self.m_radio)
@@ -2484,7 +2430,7 @@ class ActuatorPropertiesDialog(QDialog):
         elif self.vca_radio.isChecked():
             return "VCA"
         else:
-            return "M"
+            return "M  "
 
     def format_input(self):
         sender = self.sender()
@@ -2758,9 +2704,6 @@ class TimelineCanvas(FigureCanvas):
             "stop_time": new_stop_time,
             "parameters": new_signal_parameters
         })
-
-        # print(adjusted_signals)
-        #print("LOL")
 
         self.signals = adjusted_signals
         self.plot_all_signals()  # Update the plot with the modified signals
@@ -3873,7 +3816,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Store the TimelineCanvas in the dictionary
         self.timeline_canvases[actuator_id] = self.timeline_canvas
 
-        # Retrieve and plot the signal data for this actuator
         # Retrieve and plot the signal data for this actuator
         if actuator_id in self.actuator_signals:
             self.timeline_canvas.signals = self.actuator_signals[actuator_id]
