@@ -1,33 +1,31 @@
-import sys
-import os
-import matplotlib
-import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-import random
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6 import uic
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
+
+import sys
+import os
+import platform
+import random
+import time
+
+import numpy as np
+from collections import deque
+
+import matplotlib
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+from python_ble_api import python_ble_api
+from signal_segmentation_api import signal_segmentation_api
+
+
 matplotlib.use('QtAgg')
 from matplotlib.colors import to_rgba
 import pickle
 import csv
 from scipy import signal
-
-from PyQt6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QDialog
-from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtGui import QPen, QColor, QBrush
-from PyQt6.QtCore import pyqtSignal
-
-from python_ble_api import python_ble_api
-import time
-from collections import deque
-
-from signal_segmentation_api import signal_segmentation_api
-
-import platform
 
 # Check the OS and assign a value to the variable accordingly
 if platform.system() == "Darwin":  # macOS
