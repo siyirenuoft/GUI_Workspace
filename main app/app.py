@@ -9,23 +9,21 @@ import os
 import platform
 import random
 import time
-
+import pickle
+import csv
+from scipy import signal
 import numpy as np
 from collections import deque
 
 import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+matplotlib.use('QtAgg')
+from matplotlib.colors import to_rgba
 
 from python_ble_api import python_ble_api
 from signal_segmentation_api import signal_segmentation_api
 
-
-matplotlib.use('QtAgg')
-from matplotlib.colors import to_rgba
-import pickle
-import csv
-from scipy import signal
 
 # Check the OS and assign a value to the variable accordingly
 if platform.system() == "Darwin":  # macOS
@@ -52,7 +50,7 @@ class BluetoothDeviceSearchThread(QtCore.QThread):
 
     def run(self):
         # This method will be executed in a separate thread
-        devices = self.ble_api.get_ble_devices()  # Use your BLE API to get device list
+        devices = self.ble_api.get_ble_devices()
         self.devices_found.emit(devices)  # Emit the devices found signal
 
 class BluetoothConnectThread(QtCore.QThread):
@@ -68,7 +66,7 @@ class BluetoothConnectThread(QtCore.QThread):
         self.connection_result.emit(success)  # Emit the result (success or failure)
 
 class BluetoothConnectDialog(QtWidgets.QDialog):
-    device_selected_signal = QtCore.pyqtSignal(bool) # This signal is for transmitting both connect and disconnect boolean
+    device_selected_signal = QtCore.pyqtSignal(bool)
 
     def __init__(self, ble_api, parent=None):
         super(BluetoothConnectDialog, self).__init__(parent)
@@ -657,7 +655,6 @@ class MplCanvas(FigureCanvas):
     def add_signal(self, signal_data, combine):
         new_signal = np.array(signal_data["data"])
         new_signal_sampling_rate = signal_data["value0"]["sampling_rate"]
-        print(new_signal_sampling_rate)
         
         if self.current_signal is None:
             self.current_signal = new_signal
@@ -695,7 +692,6 @@ class MplCanvas(FigureCanvas):
         self.current_signal = None
         self.app_reference.first_signal_drop = 0
         self.plot([], [])
-        print(self.app_reference.first_signal_drop)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):
@@ -770,7 +766,7 @@ class MplCanvas(FigureCanvas):
                 self.add_signal(customized_signal, combine=True)
         
         self.app_reference.first_signal_drop += 1
-        print("drop",self.app_reference.first_signal_drop)
+        # print("drop",self.app_reference.first_signal_drop)
 
     def generate_custom_general_oscillator_json(self, signal_type, frequency, rate, duration):
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
@@ -2062,7 +2058,6 @@ class ActuatorCanvas(QGraphicsView):
             # Example of using QPixmap if applicable
             pixmap = QPixmap(100, 100)  # Ensure pixmap is properly initialized
             if pixmap.isNull():
-                # print("Error: QPixmap is null")
                 pass
             else:
                 scaled_pixmap = pixmap.scaled(50, 50, Qt.AspectRatioMode.KeepAspectRatio)
@@ -2171,13 +2166,11 @@ class ActuatorCanvas(QGraphicsView):
                 new_branch = new_id.split('.')[0]
                 if old_branch != new_branch:
                     if actuator.predecessor:
-                        #print("pred", actuator.predecessor)
                         predecessor_actuator = self.get_actuator_by_id(actuator.predecessor)
                         if predecessor_actuator:
                             predecessor_actuator.successor = None
                         
                     if actuator.successor:
-                        #print("succ", actuator.successor)
                         successor_actuator = self.get_actuator_by_id(actuator.successor)
                         if successor_actuator:
                             successor_actuator.predecessor = None
@@ -2342,7 +2335,6 @@ class ActuatorCanvas(QGraphicsView):
                 self.scene.removeItem(item)
 
     def highlight_actuators_at_time(self, time_position):
-        # print("here!!")
         for actuator in self.actuators:
             signals = self.haptics_app.actuator_signals.get(actuator.id, [])
             is_active = any(signal["start_time"] <= time_position <= signal["stop_time"] for signal in signals)
@@ -3476,7 +3468,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Update the state of pushButton_5 based on whether any actuators have signals."""
         # Check if any actuator has signals
         has_signals = any(self.actuator_signals.values())
-        # print("HAHA", self.actuator_signals)
 
         if has_signals:
             self.pushButton_5.setEnabled(True)
@@ -3676,7 +3667,6 @@ class Haptics_App(QtWidgets.QMainWindow):
     def update_actuator_text(self):
         # Find the global largest stop time across all actuators
         all_stop_times = []
-        # print("!!!!!",self.actuator_signals)  
         for signals in self.actuator_signals.values():
             all_stop_times.extend([signal["stop_time"] for signal in signals])
 

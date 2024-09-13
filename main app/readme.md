@@ -36,8 +36,3 @@ If you encounter any issues:
 - Check that your Python environment is properly configured.
 - For Bluetooth connectivity issues, ensure your system's Bluetooth is enabled and functioning correctly.
 
-## Support
-For further assistance or to report bugs, please contact the development team at bingjian.huang@mail.utoronto.ca.
-
----
-© 2024 Dynamic Graphics Project Lab, University of Toronto. All rights reserved.
