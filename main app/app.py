@@ -3239,7 +3239,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
 
-        self.statusBar().showMessage("Welcome to Haptics App")
+        self.statusBar().showMessage("Welcome to VibraForge GUI Editor")
 
         # Add a flag to track the first signal drop
         self.first_signal_drop = 0
