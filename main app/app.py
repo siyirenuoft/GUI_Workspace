@@ -23,6 +23,7 @@ from matplotlib.colors import to_rgba
 from python_ble_api import python_ble_api
 from signal_segmentation_api import signal_segmentation_api
 from utils import *
+from timeline_timer import TimelineTimer
 
 class BluetoothDeviceSearchThread(QtCore.QThread):
     devices_found = QtCore.pyqtSignal(list)
@@ -257,7 +258,7 @@ class HapticCommandManager:
                 if commands_to_send:
                     self.ble_api.send_command_list(commands_to_send)  # Send the list of commands
                     self.last_sent_commands = commands_to_send  # Log the last sent commands
-                    print(f"Sending command list at Time {current_time}: {commands_to_send}")
+                    # print(f"Sending command list at Time {current_time}: {commands_to_send}")
                 
                 self.last_send_time_dequeue = current_time
 
@@ -3301,10 +3302,13 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Connect the pushButton_5 click to the toggle_slider_movement method
         self.pushButton_5.clicked.connect(self.toggle_slider_movement)
 
-
-        # Create a QTimer for slider movement
-        self.slider_timer = QTimer()
-        self.slider_timer.timeout.connect(self.move_slider)
+        # setup the timeline timer
+        self.timeline_thread = QThread()
+        self.timeline_timer = TimelineTimer()
+        self.timeline_timer.time_updated.connect(self.move_slider)
+        self.timeline_timer.moveToThread(self.timeline_thread)
+        self.timeline_thread.start()
+        
 
         # Initialize the current time position
         self.current_time_position = 0  
@@ -3433,38 +3437,33 @@ class Haptics_App(QtWidgets.QMainWindow):
         """Start moving the slider based on the current slider position."""
         self.start_time = time.time() - self.current_time_position  # Adjust start time based on current slider position
         self.slider_moving = True
-        self.slider_timer.start(10)  # Timer interval for updating the slider position
+        self.timeline_timer.play()  # Timer interval for updating the slider position
         self.pushButton_5.setIcon(self.pause_icon)
         self.actuator_canvas.setEnabled(False)
 
     def pause_slider_movement(self):
         """Pause the slider movement."""
-        self.slider_timer.stop()
+        self.timeline_timer.pause()
         self.slider_moving = False
         self.pushButton_5.setIcon(self.run_icon)  # Switch back to Run icon
         self.actuator_canvas.setEnabled(True)
 
+    # calculate the longest play time of all signals
     def calculate_total_time(self):
         all_stop_times = []
         for signals in self.actuator_signals.values():
             all_stop_times.extend([signal["stop_time"] for signal in signals])
         return max(all_stop_times) if all_stop_times else 0
 
-    def move_slider(self):
+    def move_slider(self, timeline_time):
         """Move the slider in real time based on the signal's total time."""
         if self.slider_moving:
-            # Get the elapsed time since the slider movement started
-            current_time = time.time()
-            elapsed_time = current_time - self.start_time  # Calculate the real elapsed time
-            
+            self.current_time_position = timeline_time
             # Calculate the total time of all signals
             total_time = self.calculate_total_time()
 
             # Ensure total_time is valid
             if total_time > 0:
-                # Calculate the current time position as a ratio of the elapsed time to the total time
-                self.current_time_position = min(elapsed_time, total_time)  # Ensure it doesn't exceed the total time
-
                 # Update the label with the current time
                 self.update_time_label(self.current_time_position)
 
@@ -3485,7 +3484,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.actuator_canvas.highlight_actuators_at_time(self.current_time_position)
             else:
                 print("Warning: No signals found or invalid total time.")
-                self.slider_timer.stop()
+                self.timeline_timer.reset()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
                 self.actuator_canvas.setEnabled(True)
@@ -3493,7 +3492,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
             # Stop the slider when it reaches the end of the total time
             if self.current_time_position >= total_time:
-                self.slider_timer.stop()
+                self.timeline_timer.reset()
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
                 self.actuator_canvas.setEnabled(True)
@@ -3503,6 +3502,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.current_time_position = 0  # Reset current position to 0 for next play
 
             # Update the haptic manager with the new signal information
+            print(f"timeline time = {self.current_time_position}, time = {time.perf_counter()}")
             self.haptic_manager.update(current_amplitudes, current_signals)
 
 

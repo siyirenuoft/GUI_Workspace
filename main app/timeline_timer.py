@@ -1,9 +1,8 @@
-from time import perf_counter
-import time
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
+from time import perf_counter
 
-class TimelineTimer(QThread):
+class TimelineTimer(QObject):
     # Signals to communicate with other components
     time_updated = pyqtSignal(float)  # Emitted every 5 ms with the updated current time
 
@@ -11,24 +10,20 @@ class TimelineTimer(QThread):
         super().__init__()
         self.playing = False  # Indicates whether the timer is playing or paused
         self.current_time = 0.0  # Keeps track of the timeline's current time
-        self.update_interval = 0.005  # 5 ms interval
-        self.sleep_interval = 0.001 # 1 ms interval
+        self.update_interval = 5  # 5 ms interval in milliseconds
 
-    def run(self):
-        last_update_time = perf_counter()
-        print("Timer started")
-        while True:
-            now = perf_counter()
-            if now - last_update_time >= self.update_interval:
-                self.update()
-                last_update_time = now
-            # Ensure the thread sleeps for the correct amount of time
-            time.sleep(self.sleep_interval)
+        # Create a QTimer
+        self.timer = QTimer()
+        self.timer.setInterval(self.update_interval)
+        self.timer.timeout.connect(self.update)
+        self.timer.start()
 
     def update(self):
         """Update the current time and emit the time_updated signal."""
         if self.playing:
-            self.current_time += self.update_interval
+            print("timeline timer, ", perf_counter())
+            self.current_time += self.update_interval / 1000.0  # Convert ms to seconds
+            self.current_time = round(self.current_time, 6)
             self.time_updated.emit(self.current_time)
 
     def play(self):
@@ -39,16 +34,15 @@ class TimelineTimer(QThread):
         """Pause the timeline."""
         self.playing = False
 
-    # plays till the end of the timeline
     def reset(self):
         """Reset the timeline to the initial state."""
+        self.playing = False
         self.current_time = 0.0
 
-    # if the user manually moves the slider, update the current time
     def manual_update(self, current_time):
         """Manually update the timeline's current time."""
+        self.playing = False
         self.current_time = current_time
-
 
 
 class MainWindow(QMainWindow):
@@ -57,17 +51,26 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Timeline Timer Example")
         self.setGeometry(100, 100, 400, 200)
 
-        # Create timeline timer instance
-        self.timeline_timer = TimelineTimer()
-        self.timeline_timer.time_updated.connect(self.on_time_updated)
-        self.timeline_timer.start()
+        # Create a thread
+        self.thread = QThread()
+
+        # Create timeline worker and move it to the thread
+        self.timeline_worker = TimelineTimer()
+        self.timeline_worker.moveToThread(self.thread)
+
+        # Start the worker's timer when the thread starts
+        # self.thread.started.connect(self.timeline_worker.start)
+        self.timeline_worker.time_updated.connect(self.on_time_updated)
+
+        # Start the thread
+        self.thread.start()
 
         # Create play/pause buttons
         self.play_button = QPushButton("Play")
         self.pause_button = QPushButton("Pause")
 
-        self.play_button.clicked.connect(self.timeline_timer.play)
-        self.pause_button.clicked.connect(self.timeline_timer.pause)
+        self.play_button.clicked.connect(self.timeline_worker.play)
+        self.pause_button.clicked.connect(self.timeline_worker.pause)
 
         # Set up layout
         layout = QVBoxLayout()
@@ -82,8 +85,9 @@ class MainWindow(QMainWindow):
         print(f"Current Time: {current_time:.6f} s")
 
     def closeEvent(self, event):
-        # Stop the timeline timer when the window is closed
-        self.timeline_timer.reset()
+        # Stop the timeline worker and the thread when the window is closed
+        self.thread.quit()
+        self.thread.wait()
         super().closeEvent(event)
 
 
