@@ -6,7 +6,6 @@ from PyQt6.QtGui import *
 
 import sys
 import os
-import platform
 import random
 import time
 import pickle
@@ -23,23 +22,7 @@ from matplotlib.colors import to_rgba
 
 from python_ble_api import python_ble_api
 from signal_segmentation_api import signal_segmentation_api
-
-
-# Check the OS and assign a value to the variable accordingly
-if platform.system() == "Darwin":  # macOS
-    os_dependent_value = 3
-elif platform.system() == "Windows":  # Windows
-    os_dependent_value = 2
-else:
-    os_dependent_value = 2  # Default value for other OS (Linux, etc.)
-
-print(f"The OS-dependent value is: {os_dependent_value}")
-
-TIME_STAMP = 44100
-
-def to_subscript(text):
-    subscript_map = str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉')
-    return text.translate(subscript_map)
+from utils import *
 
 class BluetoothDeviceSearchThread(QtCore.QThread):
     devices_found = QtCore.pyqtSignal(list)
@@ -201,7 +184,6 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
             self.disconnect_from_device()  # Call the method to disconnect
         else:
             self.status_label.setText("Disconnection cancelled.")
-
 
 class HapticCommandManager:
     def __init__(self, ble_api):
@@ -381,8 +363,6 @@ class HapticCommandManager:
             self.ble_api.send_command_list(stop_commands)  # Send stop commands in a batch
             print(f"[End of Slider] Sending stop command list: {stop_commands}")
 
-
-        
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
         self.actuator_canvas = actuator_canvas
@@ -1397,63 +1377,6 @@ class PWMDialog(QDialog):
             "duty_cycle": self.duty_cycle_input.value(),
             "duration": self.duration_input.value(),
         }
-
-# Define the ACTUATOR_CONFIG dictionary
-ACTUATOR_CONFIG = {
-    "LRA": {
-        "text_vertical_offset": -0.5,
-        "text_horizontal_offset": 0.5,
-        "font_size_factor": 0.9,
-        "min_font_size": 6,
-        "max_font_size": 12
-    },
-    "VCA": {
-        "text_vertical_offset": -1,
-        "text_horizontal_offset": 0.25,
-        "font_size_factor": 0.9,
-        "min_font_size": 6,
-        "max_font_size": 12
-    },
-    "M  ": {
-        "text_vertical_offset": -0.8,
-        "text_horizontal_offset": 0.25,
-        "font_size_factor": 0.9,
-        "min_font_size": 6,
-        "max_font_size": 12
-    }
-}
-
-# Predefined color list for actuators (20 colors)
-COLOR_LIST = [
-    QColor(158, 175, 163),  # Dark Sea Green
-    QColor(194, 166, 159),  # Pale Taupe
-    QColor(194, 178, 128),  # Khaki
-    QColor(145, 141, 18),  # Khaki
-    QColor(150, 143, 132),  # Dark Gray
-    QColor(175, 167, 191),  # Thistle
-    QColor(144, 175, 197),  # Cadet Blue
-    QColor(151, 102, 102),  
-    QColor(227, 140, 122),
-    QColor(103, 98, 172),
-    QColor(33, 104, 80),
-    QColor(183, 87, 116),
-    QColor(119, 80, 29),
-    QColor(172, 94, 169),
-    QColor(81, 146, 58),
-    QColor(21, 45, 138),
-    QColor(206, 21, 39),
-    QColor(199, 90, 18),
-    QColor(100, 199, 187),
-    QColor(209, 139, 0),
-]
-
-# Function to generate a contrasting color
-def generate_contrasting_color(existing_colors):
-    while True:
-        new_color = QColor(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        contrast = all(abs(new_color.red() - color.red()) + abs(new_color.green() - color.green()) + abs(new_color.blue() - color.blue()) > 200 for color in existing_colors)
-        if contrast:
-            return new_color
 
 class ActuatorSignalHandler(QObject):
     clicked = pyqtSignal(str)  # Signal to indicate actuator is clicked
@@ -3127,8 +3050,8 @@ class FloatingVerticalSlider(QSlider):
 
         # Calculate the minimum and maximum x positions (3 cm from the left edge and 1 cm from the right edge)
         dpi = self.logicalDpiX()  # Get the screen DPI
-        self.left_offset = (os_dependent_value / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (os_dependent_value / 2.54) * dpi  # 1 cm in pixels
+        self.left_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # 1 cm in pixels
         self.global_total_time = None
 
         # Store the initial vertical position to lock it
@@ -3152,8 +3075,8 @@ class FloatingVerticalSlider(QSlider):
     def update_movable_range(self):
         """Recalculate the slider's movable range and adjust its position based on the window size."""
         dpi = self.logicalDpiX()
-        self.left_offset = (os_dependent_value / 2.54) * dpi  # 3 cm in pixels
-        self.right_offset = (os_dependent_value / 2.54) * dpi  # 1 cm in pixels
+        self.left_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # 3 cm in pixels
+        self.right_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # 1 cm in pixels
 
         # Ensure slider is within new bounds after resizing
         max_x = int(self.parent().width() - self.width() - self.right_offset)
@@ -3273,7 +3196,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Add ActuatorCanvas to the layout with a fixed height
         self.actuator_canvas = ActuatorCanvas(self.ui.widget_2,app_reference=self)
-        self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
+        # self.actuator_canvas.setFixedHeight(380)  # Set the fixed height here
         self.ui.gridLayout_5.addWidget(self.actuator_canvas, 0, 0, 1, 1)
 
         # Create a scene for the selection bar
@@ -3478,7 +3401,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.slider_target_pos = 0  # No movement target
             # Set the initial position 3 cm away from the left edge
             dpi = self.logicalDpiX()  # Get the screen DPI
-            cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
+            cm_to_pixels = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 3 cm to pixels
             initial_position = int(cm_to_pixels)  # 3 cm in pixels
             self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
             self.floating_slider.set_slider_movable(False)  # Disable slider movement
@@ -3491,7 +3414,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Calculate the target position in pixels based on the max stop time and total time
         if max_stop_time and self.total_time:
             dpi = self.logicalDpiX()
-            cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
+            cm_to_pixels = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 3 cm to pixels
             adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
 
             # Calculate the target position based on the time ratio
@@ -3550,7 +3473,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
                 # Calculate the new slider position based on the time ratio
                 dpi = self.logicalDpiX()
-                cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
+                cm_to_pixels = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 3 cm to pixels
                 adjusted_width = self.ui.scrollAreaWidgetContents.width() - 2 * cm_to_pixels
                 new_pos = int(time_ratio * adjusted_width + cm_to_pixels)
 
@@ -3597,7 +3520,7 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Set the initial position 3 cm away from the left edge
         dpi = self.logicalDpiX()  # Get the screen DPI
-        cm_to_pixels = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
+        cm_to_pixels = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 3 cm to pixels
         initial_position = int(cm_to_pixels)  # 3 cm in pixels
         self.floating_slider.move(initial_position, self.floating_slider.y())  # Set the initial position
 
@@ -3677,8 +3600,8 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Define the 3 cm left offset and 1 cm right offset in pixels
         dpi = self.logicalDpiX()  # Get the screen DPI
-        left_offset = (os_dependent_value / 2.54) * dpi  # Convert 3 cm to pixels
-        right_offset = (os_dependent_value / 2.54) * dpi  # Convert 1 cm to pixels
+        left_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 3 cm to pixels
+        right_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 1 cm to pixels
 
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
@@ -4400,17 +4323,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         index = self.customizes.indexOfChild(item)
         if index != -1:
             self.customizes.takeChild(index)
-
-class Worker(QtCore.QRunnable):
-    def __init__(self, function, *args, **kwargs):
-        super().__init__()
-        self.function = function
-        self.args = args
-        self.kwargs = kwargs
-
-    @pyqtSlot()
-    def run(self):
-        self.function(*self.args, **self.kwargs)
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)

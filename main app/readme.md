@@ -11,12 +11,12 @@ Ensure you have the following dependencies installed:
 - NumPy
 - Matplotlib
 - SciPy
-- PyBluez (for Bluetooth functionality)
+- Bleak
 
 You can install the required Python packages using pip:
 
 ```bash
-pip install PyQt6 numpy matplotlib scipy pybluez
+pip install PyQt6 numpy matplotlib scipy bleak
 ```
 
 ## Running the Application
