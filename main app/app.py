@@ -189,26 +189,17 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
 class HapticCommandManager:
     def __init__(self, ble_api):
         self.ble_api = ble_api
-        self.command_queue = deque(maxlen=None)  
-        self.last_send_time_queue = 0
-        self.last_send_time_dequeue = 0
         self.is_playing = False
         self.CHAIN_JUMP_INDEX = 16
-        self.CMD_SENDING_FREQ = 200  # Hz
-        self.CMD_SENDING_INTERVAL = 1 / self.CMD_SENDING_FREQ
-
-        self.last_sent_addr = None
         self.active_actuators = set()
-
         self.last_sent_commands = [] # for the end of the slider use
-        self.active_signals = {}  
 
 
     def detect_leaving_edges(self, current_amplitudes):
         current_actuators = set(current_amplitudes.keys())
         leaving_edges = self.active_actuators - current_actuators
         stop_commands = [
-            (self.actuator_id_to_addr(actuator_id), 0, 0, 0)
+            self.prepare_command(actuator_id, 0, 0, 0)  # Prepare stop command
             for actuator_id in leaving_edges
         ]
         self.active_actuators = current_actuators
@@ -233,49 +224,30 @@ class HapticCommandManager:
         # Return the index of the closest frequency
         return frequency_set.index(closest_freq)
 
-    def prepare_command(self, actuator_id, amplitude, frequency):
-        addr = self.actuator_id_to_addr(actuator_id)
-        duty = self.map_amplitude_to_duty(amplitude)
-        freq = self.map_frequency_to_freq_param(frequency)
-        
-        return (addr, duty, freq, 1)  # 1 for start
+    def prepare_command(self, actuator_id, amplitude, frequency, start_or_stop=1):
+        return {
+            'addr': self.actuator_id_to_addr(actuator_id),
+            'duty': self.map_amplitude_to_duty(amplitude),
+            'freq': self.map_frequency_to_freq_param(frequency),
+            'start_or_stop': start_or_stop
+        }  # 1 for start
 
-    def process_commands(self):
-        current_time = time.time()
-        if current_time - self.last_send_time_dequeue >= self.CMD_SENDING_INTERVAL:
-            if self.command_queue and self.is_playing:
-                commands_to_send = []
-                while self.command_queue:
-                    addr, duty, freq, start_stop = self.command_queue.popleft()
-                    commands_to_send.append({
-                        "addr": addr,
-                        "duty": duty,
-                        "freq": freq,
-                        "start_or_stop": start_stop
-                    })
-                    self.last_sent_addr = addr
-                
-                if commands_to_send:
-                    self.ble_api.send_command_list(commands_to_send)  # Send the list of commands
-                    self.last_sent_commands = commands_to_send  # Log the last sent commands
-                    # print(f"Sending command list at Time {current_time}: {commands_to_send}")
-                
-                self.last_send_time_dequeue = current_time
+    def process_commands(self, commands):
+        if commands != None and self.is_playing:
+            self.ble_api.send_command_list(commands)  # Send the list of commands
+            self.last_sent_commands = commands  # Log the last sent commands
+            print(f"Sending command list at Time {time.perf_counter()}: {commands}")
 
     def start_playback(self):
         self.is_playing = True
-        self.command_queue.clear()
-        self.active_signals.clear()  # Clear previous active signals to ensure new ones are detected
 
     def stop_playback(self):
         self.is_playing = False
         # Generate stop commands for all active actuators based on the current active signals
         stop_commands = [
             {"addr": self.actuator_id_to_addr(actuator_id), "duty": 0, "freq": 0, "start_or_stop": 0}
-            for actuator_id in self.active_signals.keys()
+            for actuator_id in self.active_actuators
         ]
-        
-        self.command_queue.clear()
         
         # Send STOP commands to the actuators
         if stop_commands:
@@ -286,83 +258,21 @@ class HapticCommandManager:
         
         # Clear active actuators and active signals after sending the stop commands
         self.active_actuators.clear()
-        self.active_signals.clear()
 
 
-    def update(self, current_amplitudes, current_signals):
+    def update(self, current_amplitudes):
         """Update the playing signals if there is a change."""
-        current_time = time.time()
-
         # Detect leaving edges and generate stop commands
         stop_commands = self.detect_leaving_edges(current_amplitudes)
 
         # Prepare all commands for active actuators, ensuring we handle None parameters safely
-        active_commands = [
-            self.prepare_command(
-                actuator_id,
-                signal_details["current_amplitude"],
-                signal_details["current_frequency"]
-            )
-            for actuator_id, signal_details in current_amplitudes.items()
-        ]
+        active_commands = []
+        for actuator_id, signal_details in current_amplitudes.items():
+            active_commands.append(self.prepare_command(actuator_id, signal_details["current_amplitude"], signal_details["current_frequency"], 1))
 
-        # If active_signals is empty, treat it as the first update and force signal detection
-        if not self.active_signals or self.active_signals != current_signals:
-            # Update active signals if there's a change
-            self.active_signals = current_signals.copy()
-
-            # Log the current signals
-            current_time = time.time()
-            print("New signals detected or first update. Updating...")
-            for actuator_id, signal_details in current_signals.items():
-                print(f"Actuator ID: {actuator_id}")
-                print(f"  Type: {signal_details['type']}")
-                print(f"  Start Time: {signal_details['start_time']}")
-                print(f"  Stop Time: {signal_details['stop_time']}")
-                print(f"  Full Data Length: {len(signal_details['data'])}")
-                
-
-                # Print the frequency from high_freq if available
-                if "high_freq" in signal_details:
-                    print(f"  First High Frequency Value: {signal_details['high_freq'][0]}")
-                else:
-                    print("  No High Frequency Data available")
-
-                if "low_freq" in signal_details:
-                    print(f"  Low Frequency Data Length: {len(signal_details['low_freq'])}")
-                else:
-                    print("  No Low Frequency Data available")
-
-        # Time-guarded queueing logic
-        if current_time - self.last_send_time_queue >= self.CMD_SENDING_INTERVAL:
-            # Combine stop commands and active commands
-            all_commands = stop_commands + active_commands
-
-            # Sort commands to prioritize addresses that haven't been sent recently
-            all_commands.sort(key=lambda cmd: cmd[0] == self.last_sent_addr)
-
-            # Add all commands to the queue
-            self.command_queue.extend(all_commands)
-
-            # Update the last send time after queueing the commands
-            self.last_send_time_queue = current_time
-
+        all_commands = stop_commands + active_commands
         # Process the commands (not time-guarded)
-        self.process_commands()
-
-    def end_of_slider(self):
-        self.is_playing = False
-
-        # Use the last sent commands if the queue is empty
-        stop_commands = [
-            {"addr": addr, "duty": 0, "freq": 0, "start_or_stop": 0} 
-            for addr in set(cmd["addr"] for cmd in self.command_queue or self.last_sent_commands)
-        ]
-        
-        self.command_queue.clear()
-        if stop_commands:
-            self.ble_api.send_command_list(stop_commands)  # Send stop commands in a batch
-            print(f"[End of Slider] Sending stop command list: {stop_commands}")
+        self.process_commands(all_commands)
 
 class DesignSaver:
     def __init__(self, actuator_canvas, timeline_canvases, mpl_canvas, app_reference):
@@ -3480,7 +3390,7 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.floating_slider.move(int(new_pos), self.floating_slider.y())
 
                 # Highlight actuators and update signals based on the new time position
-                current_amplitudes, current_signals = self.update_current_amplitudes(self.current_time_position)
+                current_amplitudes = self.update_current_amplitudes(self.current_time_position)
                 self.actuator_canvas.highlight_actuators_at_time(self.current_time_position)
             else:
                 print("Warning: No signals found or invalid total time.")
@@ -3496,14 +3406,14 @@ class Haptics_App(QtWidgets.QMainWindow):
                 self.slider_moving = False
                 self.pushButton_5.setIcon(self.run_icon)
                 self.actuator_canvas.setEnabled(True)
-                self.haptic_manager.end_of_slider()
+                self.haptic_manager.stop_playback()
 
                 # Reset to the beginning when reaching the end
                 self.current_time_position = 0  # Reset current position to 0 for next play
 
             # Update the haptic manager with the new signal information
-            print(f"timeline time = {self.current_time_position}, time = {time.perf_counter()}")
-            self.haptic_manager.update(current_amplitudes, current_signals)
+            # print(f"timeline time = {self.current_time_position}, time = {time.perf_counter()}")
+            self.haptic_manager.update(current_amplitudes)
 
 
     def setup_slider_layer(self):
@@ -3549,7 +3459,6 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Tracing the low frequency data
 
         self.current_amplitudes.clear()
-        current_signals = {}  # New variable to store full signal details for comparison
 
         for actuator_id, signals in self.actuator_signals.items():
             for signal in signals:
@@ -3568,24 +3477,12 @@ class Haptics_App(QtWidgets.QMainWindow):
                     self.current_amplitudes[actuator_id] = {
                         "current_amplitude": amplitude,
                         "current_frequency": frequency,
-                        "parameters": signal.get("parameters", {})
-                    }
-
-                    # Update current_signals with the full signal details for comparison
-                    current_signals[actuator_id] = {
-                        "type": signal["type"],
-                        "start_time": signal["start_time"],
-                        "stop_time": signal["stop_time"],
-                        "data": signal["data"],
-                        "high_freq": signal['high_freq'],
-                        "low_freq": signal['low_freq'],
-                        "parameters": signal.get("parameters", {})
                     }
 
                     break  # Only handle one signal per actuator at a time
 
-        # Return both the current_amplitudes and current_signals
-        return self.current_amplitudes, current_signals
+        # Return both the current_amplitudes
+        return self.current_amplitudes
 
     def update_actuator_text(self):
         # Find the global largest stop time across all actuators

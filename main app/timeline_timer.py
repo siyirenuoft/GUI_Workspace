@@ -21,7 +21,7 @@ class TimelineTimer(QObject):
     def update(self):
         """Update the current time and emit the time_updated signal."""
         if self.playing:
-            print("timeline timer, ", perf_counter())
+            # print("timeline timer, ", perf_counter())
             self.current_time += self.update_interval / 1000.0  # Convert ms to seconds
             self.current_time = round(self.current_time, 6)
             self.time_updated.emit(self.current_time)
