@@ -1573,8 +1573,6 @@ class ActuatorCanvas(QGraphicsView):
         
         self.canvas_rect = QRectF(0, 0, 400, 300)
         self.white_rect_item = None
-        self.scale_line = None
-        self.scale_text = None
         self.update_canvas_visuals()
 
         self.setMouseTracking(True)
@@ -1630,7 +1628,7 @@ class ActuatorCanvas(QGraphicsView):
         """Redraw all lines connecting actuators and check for topology conflicts."""
         # Remove all existing lines and arrowheads except for the scale line and text
         for item in self.scene.items():
-            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)) and item != self.scale_line and item != self.scale_text:
+            if isinstance(item, (QGraphicsLineItem, QGraphicsPolygonItem)):
                 self.scene.removeItem(item)
 
         # Iterate through all actuators and draw lines when both conditions are met
@@ -1797,30 +1795,6 @@ class ActuatorCanvas(QGraphicsView):
         self.white_rect_item = self.scene.addRect(self.canvas_rect, QPen(Qt.GlobalColor.black), QBrush(QColor(240, 235, 229)))
         self.white_rect_item.setZValue(-999)
 
-        # Add the new scale line and text only if they don't exist
-        if not self.scale_line:
-            self.scale_line = self.scene.addLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                                self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10,
-                                                QPen(Qt.GlobalColor.black, 2))
-            self.scale_line.setZValue(1000)
-
-        if not self.scale_text:
-            self.scale_text = self.scene.addText("100 mm")
-            text_rect = self.scale_text.boundingRect()
-            self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
-            self.scale_text.setDefaultTextColor(Qt.GlobalColor.black)  # Set text color to black
-            self.scale_text.setZValue(1000)
-
-
-
-
-    def update_scale_position(self):
-        if self.scale_line and self.scale_text:
-            self.scale_line.setLine(self.canvas_rect.left() + 10, self.canvas_rect.bottom() - 10,
-                                    self.canvas_rect.left() + 110, self.canvas_rect.bottom() - 10)
-            text_rect = self.scale_text.boundingRect()
-            self.scale_text.setPos(self.canvas_rect.left() + 50 - text_rect.width() / 2, self.canvas_rect.bottom() - 15 - text_rect.height())
-
     def mousePressEvent(self, event):
         item = self.itemAt(event.pos())
 
@@ -1916,8 +1890,6 @@ class ActuatorCanvas(QGraphicsView):
 
         delta = new_pos - old_pos
         self.translate(delta.x(), delta.y())
-
-        self.update_scale_position()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2161,11 +2133,11 @@ class ActuatorCanvas(QGraphicsView):
     def clear_lines_except_scale(self):
         # Remove all lines and arrows except the scale line and scale text
         for item in self.scene.items():
-            if isinstance(item, QGraphicsLineItem) and item != self.scale_line:
+            if isinstance(item, QGraphicsLineItem):
                 self.scene.removeItem(item)
             elif isinstance(item, QGraphicsPolygonItem):  # Assuming arrows are polygons
                 self.scene.removeItem(item)
-            elif isinstance(item, QGraphicsTextItem) and item != self.scale_text:
+            elif isinstance(item, QGraphicsTextItem):
                 self.scene.removeItem(item)
 
     def highlight_actuators_at_time(self, time_position):
@@ -3038,24 +3010,7 @@ class FloatingVerticalSlider(QSlider):
             total_time = self.app_reference.calculate_total_time()
             if total_time > 0:
                 time_position = total_time * (new_x - self.left_offset) / (self.parent().width() - self.left_offset - self.right_offset)
-                self.app_reference.update_current_amplitudes(time_position)
-                self.app_reference.current_time_position = time_position  # Update the current time position
-
-                # Update the label with the current time
-                self.app_reference.update_time_label(time_position)
-
-    def update_actuator_highlight(self, slider_position):
-        # Adjust for left and right offsets
-        adjusted_width = self.parent().width() - self.left_offset - self.right_offset
-        new_pos = slider_position - self.left_offset
-        
-        total_time = self.app_reference.calculate_total_time()
-        if total_time > 0:
-            time_position = (new_pos / adjusted_width) * total_time
-            self.app_reference.actuator_canvas.highlight_actuators_at_time(time_position)
-            self.app_reference.update_current_amplitudes(time_position)
-        else:
-            print("Warning: No signals found or invalid total time.")   
+                self.app_reference.set_current_time_position_manually(time_position)
 
 class Haptics_App(QtWidgets.QMainWindow):
     def __init__(self):
@@ -3415,6 +3370,14 @@ class Haptics_App(QtWidgets.QMainWindow):
             # print(f"timeline time = {self.current_time_position}, time = {time.perf_counter()}")
             self.haptic_manager.update(current_amplitudes)
 
+    def set_current_time_position_manually(self, time_position):
+        """Set the current time position manually and update the slider position."""
+        self.current_time_position = time_position
+        self.timeline_timer.manual_update(self.current_time_position)
+        self.update_time_label(self.current_time_position)
+        self.update_current_amplitudes(self.current_time_position)
+        self.actuator_canvas.highlight_actuators_at_time(self.current_time_position)
+
 
     def setup_slider_layer(self):
         # Create a QWidget that acts as a layer for the slider
@@ -3735,7 +3698,6 @@ class Haptics_App(QtWidgets.QMainWindow):
                 width = int(dialog.width_input.text())
                 height = int(dialog.height_input.text())
                 self.actuator_canvas.set_canvas_size(width, height)
-                self.actuator_canvas.update_scale_position()
             except ValueError:
                 print("Invalid input. Please enter valid integer values for width and height.")
     
