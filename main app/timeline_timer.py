@@ -11,6 +11,8 @@ class TimelineTimer(QObject):
         self.playing = False  # Indicates whether the timer is playing or paused
         self.current_time = 0.0  # Keeps track of the timeline's current time
         self.update_interval = 5  # 5 ms interval in milliseconds
+        self.last_lapse = -1
+        self.update_count = 0
 
         # Create a QTimer
         self.timer = QTimer()
@@ -21,28 +23,39 @@ class TimelineTimer(QObject):
     def update(self):
         """Update the current time and emit the time_updated signal."""
         if self.playing:
-            # print("timeline timer, ", perf_counter())
-            self.current_time += self.update_interval / 1000.0  # Convert ms to seconds
+            current_lapse = perf_counter()
+            time_lapse = current_lapse - self.last_lapse
+            # if time_lapse > self.update_interval / 1000.0:
+            self.current_time += time_lapse
             self.current_time = round(self.current_time, 6)
+            print(self.update_count, self.current_time)
+            self.update_count += 1
+            self.last_lapse = current_lapse
             self.time_updated.emit(self.current_time)
 
     def play(self):
         """Start progressing the timeline forward."""
         self.playing = True
+        self.last_lapse = perf_counter()
+        self.update_count = 0
+        # self.timer.start()
 
     def pause(self):
         """Pause the timeline."""
         self.playing = False
+        self.last_lapse = -1
 
     def reset(self):
         """Reset the timeline to the initial state."""
         self.playing = False
         self.current_time = 0.0
+        self.last_lapse = -1
 
     def manual_update(self, current_time):
         """Manually update the timeline's current time."""
         self.playing = False
         self.current_time = current_time
+        self.last_lapse = -1
 
 
 class MainWindow(QMainWindow):
@@ -81,8 +94,11 @@ class MainWindow(QMainWindow):
         container.setLayout(layout)
         self.setCentralWidget(container)
 
+        self.update_count = 0
+
     def on_time_updated(self, current_time):
-        print(f"Current Time: {current_time:.6f} s")
+        print(f"{self.update_count+1}, Current Time: {current_time:.6f} s")
+        self.update_count += 1
 
     def closeEvent(self, event):
         # Stop the timeline worker and the thread when the window is closed
