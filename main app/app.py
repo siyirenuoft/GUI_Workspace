@@ -12,7 +12,6 @@ import pickle
 import csv
 from scipy import signal
 import numpy as np
-from collections import deque
 
 import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -24,6 +23,7 @@ from python_ble_api import python_ble_api
 from signal_segmentation_api import signal_segmentation_api
 from utils import *
 from timeline_timer import TimelineTimer
+from signal_generator import OscillatorDialog, ChirpDialog, NoiseDialog, FMDialog, PWMDialog
 
 class BluetoothDeviceSearchThread(QtCore.QThread):
     devices_found = QtCore.pyqtSignal(list)
@@ -537,6 +537,7 @@ class MplCanvas(FigureCanvas):
         
         self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
+        self.axes.set_ylim(-1.1, 1.1)  # Set y-axis limits
         self.axes.spines['bottom'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
         self.axes.spines['right'].set_color(spine_color)
@@ -615,7 +616,7 @@ class MplCanvas(FigureCanvas):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_general_oscillator_json(signal_type, config["frequency"], config["rate"], config["duration"])
+                    customized_signal = self.generate_custom_general_oscillator_json(signal_type, config["frequency"], config["amplitude"], config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
             if signal_type in ["Chirp"]:
@@ -623,7 +624,7 @@ class MplCanvas(FigureCanvas):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_chirp_json(signal_type, config["chirp_type"], config["frequency"], config["rate"],config["duration"])
+                    customized_signal = self.generate_custom_chirp_json(signal_type, config["chirp_type"], config["frequency"], config['amplitude'], config["rate"], config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
             if signal_type in ["Noise"]:
@@ -631,7 +632,7 @@ class MplCanvas(FigureCanvas):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_noise_json(signal_type, config["gain"],config["duration"])
+                    customized_signal = self.generate_custom_noise_json(signal_type, config["amplitude"],config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
             if signal_type in ["FM"]:
@@ -639,7 +640,7 @@ class MplCanvas(FigureCanvas):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_FM_json(signal_type, config["FM_type"], config["frequency"], config["modulation"],config["index"],config["duration"])
+                    customized_signal = self.generate_custom_FM_json(signal_type, config["FM_type"], config["frequency"], config['amplitude'], config["modulation"],config["index"],config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
             if signal_type in ["PWM"]:
@@ -647,7 +648,7 @@ class MplCanvas(FigureCanvas):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     config = dialog.get_config()
                     parameters = config  # Store the parameters
-                    customized_signal = self.generate_custom_PWM_json(signal_type, config["frequency"],config["duty_cycle"], config["duration"])
+                    customized_signal = self.generate_custom_PWM_json(signal_type, config["frequency"], config["amplitude"], config["duty_cycle"], config["duration"])
                     self.app_reference.update_status_bar(signal_type, parameters)  # Update the status bar
 
 
@@ -655,64 +656,22 @@ class MplCanvas(FigureCanvas):
             if customized_signal:
                 self.add_signal(customized_signal, combine=True)
 
-    def generate_custom_general_oscillator_json(self, signal_type, frequency, rate, duration):
+    def generate_custom_general_oscillator_json(self, signal_type, frequency, amplitude, duration):
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
         if signal_type == "Sine":
-            data = np.sin(2 * np.pi * frequency * t + rate * t).tolist()
+            data = np.sin(2 * np.pi * frequency * t)
         elif signal_type == "Square":
-            data = np.sign(np.sin(2 * np.pi * frequency * t)).tolist()
+            data = np.sign(np.sin(2 * np.pi * frequency * t))
         elif signal_type == "Saw":
-            data = (2 * (t * frequency - np.floor(t * frequency + 0.5))).tolist()
+            data = (2 * (t * frequency - np.floor(t * frequency + 0.5)))
         elif signal_type == "Triangle":
-            data = (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1).tolist()
-        elif signal_type == "FM":
-            data = np.sin(2 * np.pi * (frequency * t + rate * np.sin(2 * np.pi * frequency * t))).tolist()
-        elif signal_type == "PWM":
-            data = np.where(np.sin(2 * np.pi * frequency * t) >= 0, 1, -1).tolist()
-        elif signal_type == "Noise":
-            data = np.random.normal(0, 1, len(t)).tolist()
+            data = (2 * np.abs(2 * (t * frequency - np.floor(t * frequency + 0.5))) - 1)
         else:
-            data = np.zeros_like(t).tolist()  # Default for unsupported types
+            data = np.zeros_like(t)  # Default for unsupported types
+        data = (amplitude * data).tolist()
+        return self.formatting_data(signal_type, data)
 
-        return {
-            "value0": {
-                "gain": 1.0,
-                "bias": 0.0,
-                "sampling_rate": TIME_STAMP,
-                "m_ptr": {
-                    "polymorphic_id": 2147483649,
-                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
-                    "ptr_wrapper": {
-                        "valid": 1,
-                        "data": {
-                            "Concept": {},
-                            "m_model": {
-                                "IOscillator": {
-                                    "x": {
-                                        "gain": frequency * 2 * np.pi,
-                                        "bias": 0.0,
-                                        "m_ptr": {
-                                            "polymorphic_id": 2147483650,
-                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                            "ptr_wrapper": {
-                                                "valid": 1,
-                                                "data": {
-                                                    "Concept": {},
-                                                    "m_model": {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "data": data
-        }
-
-    def generate_custom_chirp_json(self, signal_type, chirp_type, frequency, rate, duration):
+    def generate_custom_chirp_json(self, signal_type, chirp_type, frequency, amplitude, rate, duration):
         # Time array
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
         
@@ -732,93 +691,18 @@ class MplCanvas(FigureCanvas):
             # Generate the triangle waveform with time-varying frequency
             data = signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP, 0.5)
         else:
-            data = np.zeros_like(t).tolist()  # Default for unsupported types
+            data = np.zeros_like(t)  # Default for unsupported types
+        data = (amplitude * data).tolist()
+        return self.formatting_data(signal_type, data)
     
-
-        return {
-            "value0": {
-                "gain": 1.0,
-                "bias": 0.0,
-                "sampling_rate": TIME_STAMP,
-                "m_ptr": {
-                    "polymorphic_id": 2147483649,
-                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
-                    "ptr_wrapper": {
-                        "valid": 1,
-                        "data": {
-                            "Concept": {},
-                            "m_model": {
-                                "IOscillator": {
-                                    "x": {
-                                        "gain": frequency * 2 * np.pi,
-                                        "bias": 0.0,
-                                        "m_ptr": {
-                                            "polymorphic_id": 2147483650,
-                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                            "ptr_wrapper": {
-                                                "valid": 1,
-                                                "data": {
-                                                    "Concept": {},
-                                                    "m_model": {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "data": data
-        }
-    
-    def generate_custom_noise_json(self, signal_type, gain, duration):
+    def generate_custom_noise_json(self, signal_type, amplitude, duration):
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
-     
-        data = (gain * np.random.normal(0, 1, len(t))).tolist()
+        # generate random noise between -1 and 1
+        data = np.random.uniform(-1, 1, len(t))
+        data = (amplitude * data).tolist()
+        return self.formatting_data(signal_type, data)
 
-
-
-        return {
-            "value0": {
-                "gain": 1.0,
-                "bias": 0.0,
-                "sampling_rate": TIME_STAMP,
-                "m_ptr": {
-                    "polymorphic_id": 2147483649,
-                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
-                    "ptr_wrapper": {
-                        "valid": 1,
-                        "data": {
-                            "Concept": {},
-                            "m_model": {
-                                "IOscillator": {
-                                    "x": {
-                                        "gain": 0.0,
-                                        "bias": 0.0,
-                                        "m_ptr": {
-                                            "polymorphic_id": 2147483650,
-                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                            "ptr_wrapper": {
-                                                "valid": 1,
-                                                "data": {
-                                                    "Concept": {},
-                                                    "m_model": {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "data": data
-        }
-
-    def generate_custom_FM_json(self, signal_type, FM_type, frequency, modulation, index, duration):
+    def generate_custom_FM_json(self, signal_type, FM_type, frequency, amplitude, modulation, index, duration):
         # Time array
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
         
@@ -838,58 +722,19 @@ class MplCanvas(FigureCanvas):
             # Generate the triangle FM signal
             data = signal.sawtooth(instantaneous_phase, 0.5)
         else:
-            data = np.zeros_like(t).tolist()  # Default for unsupported types
-    
-
-        return {
-            "value0": {
-                "gain": 1.0,
-                "bias": 0.0,
-                "sampling_rate": TIME_STAMP,
-                "m_ptr": {
-                    "polymorphic_id": 2147483649,
-                    "polymorphic_name": f"tact::Signal::Model<tact::{signal_type}>",
-                    "ptr_wrapper": {
-                        "valid": 1,
-                        "data": {
-                            "Concept": {},
-                            "m_model": {
-                                "IOscillator": {
-                                    "x": {
-                                        "gain": frequency * 2 * np.pi,
-                                        "bias": 0.0,
-                                        "m_ptr": {
-                                            "polymorphic_id": 2147483650,
-                                            "polymorphic_name": "tact::Signal::Model<tact::Time>",
-                                            "ptr_wrapper": {
-                                                "valid": 1,
-                                                "data": {
-                                                    "Concept": {},
-                                                    "m_model": {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "data": data
-        }
-   
-    def generate_custom_PWM_json(self, signal_type, frequency, duty_cycle, duration):
+            data = np.zeros_like(t)  # Default for unsupported types
+        data = (amplitude * data).tolist()
+        return self.formatting_data(signal_type, data)
+        
+    def generate_custom_PWM_json(self, signal_type, frequency, amplitude, duty_cycle, duration):
         # Time array
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
-        
-        # Calculate the period of the PWM signal
-        period = 1 / frequency
-        
-        # Generate the PWM signal
-        data = ((t % period) < (duty_cycle / 100) * period).astype(float)
+        # generate PWM signal
+        data = signal.square(2 * np.pi * frequency * t, duty_cycle/100)
+        data = (amplitude * data).tolist()
+        return self.formatting_data(signal_type, data)
     
-
+    def formatting_data(self, signal_type, data):
         return {
             "value0": {
                 "gain": 1.0,
@@ -982,308 +827,6 @@ class PreviewCanvas(FigureCanvas):
 
     def dropEvent(self, event):
         event.ignore()  # Disable drop event
-
-class OscillatorDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-
-        self.frequency_input = QDoubleSpinBox()
-        self.frequency_input.setRange(0, 400)  # Adjust range as needed
-        self.frequency_input.setValue(100)  # Default value
-        form_layout.addRow("Frequency (Hz):", self.frequency_input)
-        
-        self.rate_input = QDoubleSpinBox()
-        self.rate_input.setRange(0, 1000)  # Adjust range as needed
-        self.rate_input.setValue(0)  # Default value
-        form_layout.addRow("Rate:", self.rate_input)
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-
-        self.duration_input.setSingleStep(1)  # Increment in 1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        return {
-            "duration": self.duration_input.value(),
-            "frequency": self.frequency_input.value(),
-            "rate": self.rate_input.value()
-        }
-
-class ChirpDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        # Signal Type (Radio Buttons with Circular Layout)
-        signal_layout = QHBoxLayout()
-
-        # Create the radio buttons
-        self.sine_radio = QRadioButton("Sine")
-        self.square_radio = QRadioButton("Square")
-        self.saw_radio = QRadioButton("Saw")
-        self.triangle_radio = QRadioButton("Triangle")
-
-        # Button group to manage radio buttons (ensures mutual exclusivity)
-        self.signal_group = QButtonGroup(self)
-        self.signal_group.addButton(self.sine_radio)
-        self.signal_group.addButton(self.square_radio)
-        self.signal_group.addButton(self.saw_radio)
-        self.signal_group.addButton(self.triangle_radio)
-
-        self.sine_radio.setChecked(True)
-
-        # Set the default checked radio button based on signal_type
-        if signal_type == "Sine":
-            self.sine_radio.setChecked(True)
-        elif signal_type == "Square":
-            self.square_radio.setChecked(True)
-        elif signal_type == "Saw":
-            self.saw_radio.setChecked(True)
-        elif signal_type == "Triangle":
-            self.triangle_radio.setChecked(True)
-
-        # Add radio buttons to the layout
-        signal_layout.addWidget(self.sine_radio)
-        signal_layout.addWidget(self.square_radio)
-        signal_layout.addWidget(self.saw_radio)
-        signal_layout.addWidget(self.triangle_radio)
-
-        # Add the signal layout to the form layout
-        form_layout.addRow("Signal Type:", signal_layout)
-
-        self.frequency_input = QDoubleSpinBox()
-        self.frequency_input.setRange(0, 400)  # Adjust range as needed
-        self.frequency_input.setValue(20)  # Default value
-        form_layout.addRow("Frequency (Hz):", self.frequency_input)
-        
-        self.rate_input = QDoubleSpinBox()
-        self.rate_input.setRange(0, 1000)  # Adjust range as needed
-        self.rate_input.setValue(100)  # Default value
-        form_layout.addRow("Rate:", self.rate_input)
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-
-        self.duration_input.setSingleStep(1)  # Increment in 1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        if self.sine_radio.isChecked():
-            selected_signal = "Sine"
-        elif self.square_radio.isChecked():
-            selected_signal = "Square"
-        elif self.saw_radio.isChecked():
-            selected_signal = "Saw"
-        elif self.triangle_radio.isChecked():
-            selected_signal = "Triangle"
-        return {
-            "duration": self.duration_input.value(),
-            "chirp_type": selected_signal,
-            "frequency": self.frequency_input.value(),
-            "rate": self.rate_input.value()
-        }
-
-class NoiseDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        self.gain_input = QDoubleSpinBox()
-        self.gain_input.setRange(0, 1)  # Adjust range as needed
-        self.gain_input.setDecimals(1)  # Allow up to two decimal places
-        self.gain_input.setSingleStep(0.1)  # Increment in 0.1s steps
-        self.gain_input.setValue(1)  # Default value
-        form_layout.addRow("Gain:", self.gain_input)
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-
-        self.duration_input.setSingleStep(1)  # Increment in 1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-        
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        return {
-            "duration": self.duration_input.value(),
-            "gain": self.gain_input.value(),
-        }
-
-class FMDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        # Signal Type (Radio Buttons with Circular Layout)
-        signal_layout = QHBoxLayout()
-
-        # Create the radio buttons
-        self.sine_radio = QRadioButton("Sine")
-        self.square_radio = QRadioButton("Square")
-        self.saw_radio = QRadioButton("Saw")
-        self.triangle_radio = QRadioButton("Triangle")
-
-        # Button group to manage radio buttons (ensures mutual exclusivity)
-        self.signal_group = QButtonGroup(self)
-        self.signal_group.addButton(self.sine_radio)
-        self.signal_group.addButton(self.square_radio)
-        self.signal_group.addButton(self.saw_radio)
-        self.signal_group.addButton(self.triangle_radio)
-
-        self.sine_radio.setChecked(True)
-
-        # Set the default checked radio button based on signal_type
-        if signal_type == "Sine":
-            self.sine_radio.setChecked(True)
-        elif signal_type == "Square":
-            self.square_radio.setChecked(True)
-        elif signal_type == "Saw":
-            self.saw_radio.setChecked(True)
-        elif signal_type == "Triangle":
-            self.triangle_radio.setChecked(True)
-
-        # Add radio buttons to the layout
-        signal_layout.addWidget(self.sine_radio)
-        signal_layout.addWidget(self.square_radio)
-        signal_layout.addWidget(self.saw_radio)
-        signal_layout.addWidget(self.triangle_radio)
-
-        # Add the signal layout to the form layout
-        form_layout.addRow("Signal Type:", signal_layout)
-
-        self.frequency_input = QDoubleSpinBox()
-        self.frequency_input.setRange(0, 400)  # Adjust range as needed
-        self.frequency_input.setValue(10)  # Default value
-        form_layout.addRow("Frequency (Hz):", self.frequency_input)
-        
-        self.modulation_input = QDoubleSpinBox()
-        self.modulation_input.setRange(0, 40)  # Adjust range as needed
-        self.modulation_input.setValue(10)  # Default value
-        form_layout.addRow("Modulation Frequency (Hz):", self.modulation_input)
-
-        self.index_input = QDoubleSpinBox()
-        self.index_input.setRange(0, 25)  # Adjust range as needed
-        self.index_input.setValue(2)  # Default value
-        form_layout.addRow("Index:", self.index_input)
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-        self.duration_input.setSingleStep(1)  # Increment in 1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        if self.sine_radio.isChecked():
-            selected_signal = "Sine"
-        elif self.square_radio.isChecked():
-            selected_signal = "Square"
-        elif self.saw_radio.isChecked():
-            selected_signal = "Saw"
-        elif self.triangle_radio.isChecked():
-            selected_signal = "Triangle"
-        return {
-            "duration": self.duration_input.value(),
-            "FM_type": selected_signal,
-            "frequency": self.frequency_input.value(),
-            "modulation": self.modulation_input.value(),
-            "index": self.index_input.value()
-        }
-
-class PWMDialog(QDialog):
-    def __init__(self, signal_type, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Customize {signal_type} Signal")
-        
-        layout = QVBoxLayout(self)
-        
-        form_layout = QFormLayout()
-
-        self.frequency_input = QDoubleSpinBox()
-        self.frequency_input.setRange(0, 400)  # Adjust range as needed
-        self.frequency_input.setValue(10)  # Default value
-        form_layout.addRow("Frequency (Hz):", self.frequency_input)
-
-
-        self.duty_cycle_input = QDoubleSpinBox()
-        self.duty_cycle_input.setRange(0, 100)  # Adjust range as needed
-        self.duty_cycle_input.setValue(70)  # Default value
-        form_layout.addRow("Duty Cycle (%):", self.duty_cycle_input)
-
-        # Configure the duration input
-        self.duration_input = QDoubleSpinBox()
-        self.duration_input.setRange(0, 60)  # Set a reasonable upper limit for duration
-        self.duration_input.setValue(1)  # Default value
-
-        self.duration_input.setSingleStep(1)  # Increment in 1s steps
-        form_layout.addRow("Duration (s):", self.duration_input)
-        
-        
-        layout.addLayout(form_layout)
-        
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-        
-    def get_config(self):
-        return {
-            "frequency": self.frequency_input.value(),
-            "duty_cycle": self.duty_cycle_input.value(),
-            "duration": self.duration_input.value(),
-        }
 
 class ActuatorSignalHandler(QObject):
     clicked = pyqtSignal(str)  # Signal to indicate actuator is clicked
