@@ -1569,9 +1569,9 @@ class ActuatorCanvas(QGraphicsView):
 
         # Set background color to rgb(134, 150, 167)
         self.setBackgroundBrush(QBrush(QColor(134, 150, 167)))
-        self.setSceneRect(-1000, -1000, 2000, 2000)  # Large scene to allow panning
+        self.setSceneRect(0, 0, 1400, 500)  # Large scene to allow panning
         
-        self.canvas_rect = QRectF(0, 0, 400, 300)
+        self.canvas_rect = QRectF(0, 0, 1400, 500)
         self.white_rect_item = None
         self.update_canvas_visuals()
 
@@ -3025,6 +3025,7 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui = uic.loadUi(ui_file_path, self)
  
         self.resize(1500, 750)
+        self.setWindowTitle("VibraForge GUI Editor")
         icon = QtGui.QIcon()
         icon_path = "resources/logo.jpg"
 
