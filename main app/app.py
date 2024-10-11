@@ -581,7 +581,6 @@ class MplCanvas(FigureCanvas):
 
     def clear_plot(self):
         self.current_signal = None
-        self.app_reference.first_signal_drop = 0
         self.plot([], [])
 
     def dragEnterEvent(self, event):
@@ -655,9 +654,6 @@ class MplCanvas(FigureCanvas):
             # If a customized signal was created or retrieved, add it to the plot
             if customized_signal:
                 self.add_signal(customized_signal, combine=True)
-        
-        self.app_reference.first_signal_drop += 1
-        # print("drop",self.app_reference.first_signal_drop)
 
     def generate_custom_general_oscillator_json(self, signal_type, frequency, rate, duration):
         t = np.linspace(0, duration, int(TIME_STAMP * duration))
@@ -3031,8 +3027,6 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         self.statusBar().showMessage("Welcome to VibraForge GUI Editor")
 
-        # Add a flag to track the first signal drop
-        self.first_signal_drop = 0
         self.total_time = None
 
         if os.path.exists(icon_path):
@@ -4071,15 +4065,6 @@ class Haptics_App(QtWidgets.QMainWindow):
 
     def save_current_signal(self):
         print("start save")
-        print("save",self.first_signal_drop)
-        # Check if the first signal has been saved
-        if self.first_signal_drop == 1:
-            print("first signal")
-            # Always prompt "Signal already exists" for the first signal and do not save it
-            QMessageBox.information(self, "Reminder", "Signal already exists!", QMessageBox.StandardButton.Ok)
-            # self.first_signal_drop = False  # Set the flag to False after the first attempt
-            return  # Do not proceed with saving the signal
-
         # Continue with saving for subsequent signals
         if self.maincanvas.current_signal is not None:
             signal_data = {
