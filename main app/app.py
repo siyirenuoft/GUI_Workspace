@@ -1108,9 +1108,9 @@ class ActuatorCanvas(QGraphicsView):
 
         # Set background color to rgb(134, 150, 167)
         self.setBackgroundBrush(QBrush(QColor(134, 150, 167)))
-        self.setSceneRect(0, 0, 1400, 500)  # Large scene to allow panning
+        self.setSceneRect(0, 0, 700, 300)  # Large scene to allow panning
         
-        self.canvas_rect = QRectF(0, 0, 1400, 500)
+        self.canvas_rect = QRectF(0, 0, 700, 300)
         self.white_rect_item = None
         self.update_canvas_visuals()
 
