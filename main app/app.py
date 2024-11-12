@@ -61,7 +61,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
 
         # Label for searching status
-        self.status_label = QtWidgets.QLabel("Searching For Devices...", self)
+        self.status_label = QtWidgets.QLabel("Click \"Search\" to start searching", self)
         layout.addWidget(self.status_label)
 
         # Create a horizontal layout for the buttons
@@ -73,7 +73,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
 
         # Create a Search button
         self.search_button = QtWidgets.QPushButton("Search", self)
-        self.search_button.setEnabled(False)  # Disabled while searching
+        self.search_button.setEnabled(True)  # Disabled while searching
         button_layout.addWidget(self.search_button)
 
         # Create a Connect button
@@ -88,7 +88,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         self.search_button.clicked.connect(self.start_search)
 
         # Start the initial search for devices in a background thread
-        self.start_search()
+        # self.start_search()
 
     def start_search(self):
         """Start searching for devices in the background thread."""
