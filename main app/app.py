@@ -1460,7 +1460,7 @@ class ActuatorCanvas(QGraphicsView):
     def show_context_menu(self, actuator, pos):
         menu = QMenu()
         edit_action = menu.addAction("Edit Properties")
-        delete_action = menu.addAction("Delete")
+        delete_action = menu.addAction("Delete Unit")
         clear_signal_action = menu.addAction("Clear Signal")
 
         action = menu.exec(self.mapToGlobal(pos))
@@ -3003,28 +3003,29 @@ class Haptics_App(QtWidgets.QMainWindow):
 
         # Update the visual timeline for each actuator widget
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
+            # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
+            for i in reversed(range(1, actuator_widget.layout().count())):
+                item = actuator_widget.layout().takeAt(i)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+                else:
+                    del item  # Remove spacers
+
+            # Set up the layout for the actuator widget if not already done
+            if not actuator_widget.layout():
+                layout = QtWidgets.QHBoxLayout()
+                actuator_widget.setLayout(layout)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
+
+            # Ensure the ID/Type label stays in the first position
+            if actuator_label.parent() is None:
+                actuator_widget.layout().insertWidget(0, actuator_label)
+            
+            # Check if the actuator has signals
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
-
-                # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
-                for i in reversed(range(1, actuator_widget.layout().count())):
-                    item = actuator_widget.layout().takeAt(i)
-                    widget = item.widget()
-                    if widget:
-                        widget.deleteLater()
-                    else:
-                        del item  # Remove spacers
-
-                # Set up the layout for the actuator widget if not already done
-                if not actuator_widget.layout():
-                    layout = QtWidgets.QHBoxLayout()
-                    actuator_widget.setLayout(layout)
-                    layout.setContentsMargins(0, 0, 0, 0)
-                    layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
-
-                # Ensure the ID/Type label stays in the first position
-                if actuator_label.parent() is None:
-                    actuator_widget.layout().insertWidget(0, actuator_label)
 
                 # Create a container for the timeline and signal widgets
                 timeline_container = QtWidgets.QWidget(actuator_widget)
