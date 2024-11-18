@@ -210,19 +210,23 @@ class HapticCommandManager:
         return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
 
     def map_amplitude_to_duty(self, amplitude):
+        print(f"Input Amplitude: {amplitude}, Mapped Duty: {int(round(amplitude * 15))}")
         # Map amplitude from 0 to 1 to 0 to 15
         return int(round(amplitude * 15))
 
 
     def map_frequency_to_freq_param(self, frequency):
-        # Define the frequency set
-        frequency_set = [123, 145, 170, 200, 235, 275, 322, 384]
-        
-        # Find the closest frequency in the set
-        closest_freq = min(frequency_set, key=lambda x: abs(x - frequency))
-        
-        # Return the index of the closest frequency
-        return frequency_set.index(closest_freq)
+        if frequency == 0: # no high frequency component, use default 170 Hz
+            return 2
+        else:
+            # Define the frequency set
+            frequency_set = [123, 145, 170, 200, 235, 275, 322, 384]
+            
+            # Find the closest frequency in the set
+            closest_freq = min(frequency_set, key=lambda x: abs(x - frequency))
+            
+            # Return the index of the closest frequency
+            return frequency_set.index(closest_freq)
 
     def prepare_command(self, actuator_id, amplitude, frequency, start_or_stop=1):
         return {
@@ -2137,9 +2141,9 @@ class TimelineCanvas(FigureCanvas):
                     }
 
                     # Print the lengths of data, high_freq, and low_freq
-                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
-                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
-                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}, Min: {min(signal_data['data'])}, Max: {max(signal_data['data'])}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}, Min: {min(signal_data['high_freq'])}, Max: {max(signal_data['high_freq'])}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}, Min: {min(signal_data['low_freq'])}, Max: {max(signal_data['low_freq'])}")
 
 
                     # Check for overlapping signals and handle accordingly
@@ -2155,23 +2159,33 @@ class TimelineCanvas(FigureCanvas):
                 start_time, stop_time = self.show_time_input_dialog(signal_type)
                 if start_time is not None and stop_time is not None and stop_time > start_time:
                     signal_data = self.generate_signal_data(signal_type, parameters)
+                    # Repeat the signal_data to match the duration
+                    duration = stop_time - start_time
+                    num_repeats = int(duration)  # Number of full repetitions
+                    final_signal_data = np.tile(signal_data, num_repeats)
+                    # If there's any fractional part of the duration, handle it
+                    fractional_part = duration - num_repeats
+                    if fractional_part > 0:
+                        fractional_data_length = int(fractional_part * len(signal_data))  # Calculate fractional length
+                        fractional_data = signal_data[:fractional_data_length]
+                        final_signal_data = np.concatenate((final_signal_data, fractional_data))
 
                     # Perform segmentation to get high and low frequency components
                     high_freq_signal, low_freq_signal = self.segmentation_api.signal_segmentation(
-                        product_signal=signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
+                        product_signal=final_signal_data, sampling_rate=TIME_STAMP, downsample_rate=200
                     )
 
                     # Keep the original structure with "data" and add the new frequency components
                     signal_data = {
-                        'data': signal_data,  # Original data is stored under "data" (unchanged)
+                        'data': final_signal_data,  # Original data is stored under "data" (unchanged)
                         'high_freq': high_freq_signal.tolist(),  # High frequency data
                         'low_freq': low_freq_signal.tolist()     # Low frequency data
                     }
 
                     # Print the lengths of data, high_freq, and low_freq
-                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}")
-                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}")
-                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}")
+                    print(f"Original Data Length: {len(signal_data['data'])}, First 10 elements: {signal_data['data'][:10]}, Min: {min(signal_data['data'])}, Max: {max(signal_data['data'])}")
+                    print(f"High Frequency Data Length: {len(signal_data['high_freq'])}, First 10 elements: {signal_data['high_freq'][:10]}, Min: {min(signal_data['high_freq'])}, Max: {max(signal_data['high_freq'])}")
+                    print(f"Low Frequency Data Length: {len(signal_data['low_freq'])}, First 10 elements: {signal_data['low_freq'][:10]}, Min: {min(signal_data['low_freq'])}, Max: {max(signal_data['low_freq'])}")
 
 
                     # Check for overlapping signals and handle accordingly

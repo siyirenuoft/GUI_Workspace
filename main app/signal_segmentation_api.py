@@ -37,6 +37,8 @@ class signal_segmentation_api:
 
 
     def signal_segmentation(self, product_signal, sampling_rate, downsample_rate, threshold=102):
+        # print(f"product_signal: Max={np.max(product_signal)}, Min={np.min(product_signal)}")
+        # print(f"Sampling Rate: {sampling_rate}, Downsample Rate: {downsample_rate}, Threshold: {threshold}")
         # Perform STFT on the signal to get the high-frequency components
         frequencies, times, Zxx = stft(product_signal, fs=sampling_rate, nperseg=2*int(sampling_rate/downsample_rate))
         max_freq = np.argmax(np.abs(Zxx), axis=0)
@@ -54,7 +56,11 @@ class signal_segmentation_api:
         median_frequency = np.median(high_freq_signal)
         if median_frequency < threshold:
             # Set low frequency signal to the original and high frequency to zeros
-            low_freq_signal = np.abs(product_signal)
+            # low_freq_signal = np.abs(product_signal)
+            # scale the low frequency signal from [-1, 1] to [0, 1]
+            # print(f"type of produce signal: {type(product_signal)}, max: {np.max(product_signal)}, min: {np.min(product_signal)}")
+            low_freq_signal = (np.array(product_signal) + 1) / 2
+            low_freq_signal = np.clip(low_freq_signal, 0, 1)
             high_freq_signal = np.zeros_like(product_signal)
         else:
             # Filter out frequency components above downsample_rate/2 and IFFT back to time domain
@@ -74,10 +80,26 @@ class signal_segmentation_api:
         high_freq_signal = np.array(high_freq_signal)
         low_freq_signal = np.array(low_freq_signal)
 
+        # print(f"High Frequency Signal: Max={np.max(high_freq_signal)}, Min={np.min(high_freq_signal)}")
+        # # Plot the high frequency signal
+        # plt.figure(figsize=(10, 4))
+        # plt.plot(np.linspace(0, len(product_signal)-1, len(high_freq_signal)), high_freq_signal, '-o')
+        # plt.title('High Frequency Signal')
+        # plt.xlabel('Time [s]')
+        # plt.ylabel('Amplitude')
+        # plt.show()
+
+        # print(f"Low Frequency Signal: Max={np.max(low_freq_signal)}, Min={np.min(low_freq_signal)}")
+        # # Plot the low frequency signal
+        # plt.figure(figsize=(10, 4))
+        # plt.plot(np.linspace(0, len(product_signal)-1, len(low_freq_signal)), low_freq_signal, '-o')
+        # plt.title('Low Frequency Signal')
+        # plt.xlabel('Time [s]')
+        # plt.ylabel('Amplitude')
+        # plt.show()
+
         return high_freq_signal, low_freq_signal
-
-
-
+    
     # def signal_segmentation(self, product_signal, sampling_rate, downsample_rate):
     #     """Purely No Downsample Version"""
     #     # Perform STFT on the signal to get the high frequency components
@@ -150,6 +172,7 @@ class signal_segmentation_api:
 
 # Example usage
 if __name__ == '__main__':
+    ''' Read from a wav file
     wav_filename = 'square5_sine200.wav'
     # read the wav file, print the sampling rate and duration, extract the first second of the signal as product_signal
     import soundfile as sf
@@ -157,10 +180,23 @@ if __name__ == '__main__':
     print(f'Sampling rate: {fs} Hz')
     print(f'Duration: {len(signal)/fs} seconds')
     product_signal = signal[:5*fs]
+    '''
+
+    # Generate a 200Hz sine wave with 10Hz square wave modulation
+    fs = 44100  # Sampling rate in Hz
+    duration = 3  # in seconds
+    t = np.linspace(0, duration, duration*fs, endpoint=False)
+    product_signal = np.sign(np.sin(2 * np.pi * 2 * t))
+    # plot the signal
+    plt.figure(figsize=(10, 4))
+    plt.plot(t, product_signal)
+    plt.title('Product Signal')
+    plt.xlabel('Time [s]')
+    plt.ylabel('Amplitude')
+    plt.show()
 
     # Parameters
     sampling_rate = fs  # in Hz
-    duration = 5  # in seconds
 
     # Initialize the signal segmentation API
     signal_segmentation = signal_segmentation_api()
@@ -172,6 +208,7 @@ if __name__ == '__main__':
     high_freq_signal, low_freq_signal = signal_segmentation.signal_segmentation(product_signal, sampling_rate, downsample_rate)
     print(len(downsample_t), len(high_freq_signal), len(low_freq_signal))
 
+    print(f"High Frequency Signal: Max={np.max(high_freq_signal)}, Min={np.min(high_freq_signal)}")
     # Plot the high frequency signal
     plt.figure(figsize=(10, 4))
     plt.plot(downsample_t[:len(high_freq_signal)], high_freq_signal, '-o')
@@ -180,6 +217,7 @@ if __name__ == '__main__':
     plt.ylabel('Amplitude')
     plt.show()
 
+    print(f"Low Frequency Signal: Max={np.max(low_freq_signal)}, Min={np.min(low_freq_signal)}")
     # Plot the low frequency signal
     plt.figure(figsize=(10, 4))
     plt.plot(downsample_t[:len(low_freq_signal)], low_freq_signal, '-o')
