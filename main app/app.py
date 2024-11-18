@@ -2393,7 +2393,7 @@ class TimelineCanvas(FigureCanvas):
             else:
                 return np.zeros_like(t).tolist()  # Default for unsupported types
         elif signal_type == "Noise":
-            return (parameters["gain"] * np.random.normal(0, 1, len(t))).tolist()
+            return (parameters["amplitude"] * np.random.normal(0, 1, len(t))).tolist()
         else: 
             return np.zeros_like(t).tolist()
 
