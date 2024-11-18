@@ -210,7 +210,7 @@ class HapticCommandManager:
         return (ord(chain) - ord('A')) * self.CHAIN_JUMP_INDEX + int(index) - 1
 
     def map_amplitude_to_duty(self, amplitude):
-        print(f"Input Amplitude: {amplitude}, Mapped Duty: {int(round(amplitude * 15))}")
+        # print(f"Input Amplitude: {amplitude}, Mapped Duty: {int(round(amplitude * 15))}")
         # Map amplitude from 0 to 1 to 0 to 15
         return int(round(amplitude * 15))
 
@@ -237,10 +237,34 @@ class HapticCommandManager:
         }  # 1 for start
 
     def process_commands(self, commands):
-        if commands != None and self.is_playing:
-            self.ble_api.send_command_list(commands)  # Send the list of commands
-            self.last_sent_commands = commands  # Log the last sent commands
-            print(f"Sending command list at Time {time.perf_counter()}: {commands}")
+        if self.is_playing:
+            commands_filtered, self.last_sent_commands = self.filter_commands(commands, self.last_sent_commands)
+            if len(commands_filtered) > 0:
+                self.ble_api.send_command_list(commands_filtered)  # Send the list of commands
+                print(f"Sending command list at Time {time.perf_counter()}: {commands_filtered}")
+
+    def filter_commands(self, new_commands, old_commands):
+        # Filter out commands that are the same as the last sent commands
+        # update the last sent commands to the new commands, if the same addr is found but different duty, freq, or start_or_stop, update the command
+        # each command is the format of a json object: with addr, duty, freq, start_or_stop
+        new_commands_dict = {c['addr']: c for c in new_commands}
+        old_commands_dict = {c['addr']: c for c in old_commands}
+        filtered_commands = []
+        last_sent_commands = []
+        for addr, new_command in new_commands_dict.items():
+            if addr in old_commands_dict:
+                old_command = old_commands_dict[addr]
+                if new_command != old_command:
+                    filtered_commands.append(new_command)
+                    last_sent_commands.append(new_command)
+                else:
+                    last_sent_commands.append(old_command)
+            else:
+                filtered_commands.append(new_command)
+                last_sent_commands.append(new_command)
+        return filtered_commands, last_sent_commands
+
+        
 
     def start_playback(self):
         self.is_playing = True
@@ -542,6 +566,8 @@ class MplCanvas(FigureCanvas):
         self.axes.tick_params(axis='x', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.tick_params(axis='y', colors=spine_color, labelsize=8)  # Adjust tick label size here
         self.axes.set_ylim(-1.1, 1.1)  # Set y-axis limits
+        # if len(x) != 0 and x[-1] < 1.0:
+        #     self.axes.set_xlim(-0.05, 1.05)  # Set x-axis limits
         self.axes.spines['bottom'].set_color(spine_color)
         self.axes.spines['top'].set_color(spine_color)
         self.axes.spines['right'].set_color(spine_color)
@@ -2347,55 +2373,55 @@ class TimelineCanvas(FigureCanvas):
         # Generate the signal data based on the type and modified parameters
         t = np.linspace(0, parameters["duration"], int(TIME_STAMP * parameters["duration"]))
         if signal_type == "Sine":
-            return np.sin(2 * np.pi * parameters["frequency"] * t).tolist()
+            data = np.sin(2 * np.pi * parameters["frequency"] * t)
         elif signal_type == "Square":
-            return np.sign(np.sin(2 * np.pi * parameters["frequency"] * t)).tolist()
+            data = np.sign(np.sin(2 * np.pi * parameters["frequency"] * t))
         elif signal_type == "Saw":
-            return (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))).tolist()
+            data = (2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5)))
         elif signal_type == "Triangle":
-            return (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1).tolist()
+            data = (2 * np.abs(2 * (t * parameters["frequency"] - np.floor(t * parameters["frequency"] + 0.5))) - 1)
         elif signal_type == "Chirp":
             instantaneous_frequency = parameters["frequency"] + parameters["rate"] * t
             if parameters["chirp_type"] == 'Sine':
                 # Generate the sine waveform with time-varying frequency
-                return np.sin(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+                data = np.sin(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
             elif parameters["chirp_type"] == 'Square':
                 # Generate the square waveform with time-varying frequency
-                return signal.square(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+                data = signal.square(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
             elif parameters["chirp_type"] == 'Saw':
                 # Generate the sawtooth waveform with time-varying frequency
-                return signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
+                data = signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP)
             elif parameters["chirp_type"] == 'Triangle':
                 # Generate the triangle waveform with time-varying frequency
-                return signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP, 0.5)
+                data = signal.sawtooth(2 * np.pi * np.cumsum(instantaneous_frequency) / TIME_STAMP, 0.5)
             else:
-                return np.zeros_like(t).tolist()  # Default for unsupported types
+                data = np.zeros_like(t)  # Default for unsupported types
         elif signal_type == "PWM":
             period = 1 / parameters["frequency"]
-            return ((t % period) < (parameters["duty_cycle"] / 100) * period).astype(float)
+            data = ((t % period) < (parameters["duty_cycle"] / 100) * period).astype(float)
         elif signal_type == "FM":
-                    
             # Instantaneous phase
             instantaneous_phase = 2 * np.pi * parameters["frequency"] * t + parameters["index"] * np.sin(2 * np.pi * parameters["modulation"] * t)
-            
             if parameters["FM_type"] == 'Sine':
                 # Generate the sine FM signal
-                return np.sin(instantaneous_phase)
+                data = np.sin(instantaneous_phase)
             elif parameters["FM_type"] == 'Square':
                 # Generate the square FM signal
-                return signal.square(instantaneous_phase)
+                data = signal.square(instantaneous_phase)
             elif parameters["FM_type"] == 'Saw':
                 # Generate the sawtooth FM signal
-                return signal.sawtooth(instantaneous_phase)
+                data = signal.sawtooth(instantaneous_phase)
             elif parameters["FM_type"] == 'Triangle':
                 # Generate the triangle FM signal
-                return signal.sawtooth(instantaneous_phase, 0.5)
+                data = signal.sawtooth(instantaneous_phase, 0.5)
             else:
-                return np.zeros_like(t).tolist()  # Default for unsupported types
+                data = np.zeros_like(t)  # Default for unsupported types
         elif signal_type == "Noise":
-            return (parameters["amplitude"] * np.random.normal(0, 1, len(t))).tolist()
+            data = np.random.normal(0, 1, len(t))
         else: 
-            return np.zeros_like(t).tolist()
+            data = np.zeros_like(t)
+        data = (data * parameters["amplitude"]).tolist()  # Apply the amplitude scaling
+        return data
 
     def get_signal_data(self, signal_type):
         # Retrieve signal data based on signal_type
