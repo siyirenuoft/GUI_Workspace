@@ -2427,11 +2427,12 @@ class TimeInputDialog(QDialog):
         form_layout = QFormLayout()
         
         self.start_time_input = QDoubleSpinBox()
-        self.start_time_input.setRange(0, 1000)  # Adjust range as needed
+        self.start_time_input.setRange(0, 60)  # Adjust range as needed
         form_layout.addRow("Start Time (s):", self.start_time_input)
         
         self.stop_time_input = QDoubleSpinBox()
-        self.stop_time_input.setRange(0, 1000)  # Adjust range as needed
+        self.stop_time_input.setRange(0, 60)  # Adjust range as needed
+        self.stop_time_input.setValue(1.0)  # Set default stop time to 1.0s
         form_layout.addRow("Stop Time (s):", self.stop_time_input)
         
         layout.addLayout(form_layout)
