@@ -64,24 +64,20 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         self.status_label = QtWidgets.QLabel("Click \"Search\" to start searching", self)
         layout.addWidget(self.status_label)
 
-        # Create a horizontal layout for the buttons
-        button_layout = QtWidgets.QHBoxLayout()
+        # Create a Search button
+        self.search_button = QtWidgets.QPushButton("Search", self)
+        self.search_button.setEnabled(True)  # Disabled while searching
+        layout.addWidget(self.search_button)
 
         # Create a dropdown for available devices
         self.device_dropdown = QtWidgets.QComboBox(self)
         layout.addWidget(self.device_dropdown)
 
-        # Create a Search button
-        self.search_button = QtWidgets.QPushButton("Search", self)
-        self.search_button.setEnabled(True)  # Disabled while searching
-        button_layout.addWidget(self.search_button)
-
-        # Create a Connect button
+        # Create a Connect button with the text in gray color to indicate disabled state
         self.connect_button = QtWidgets.QPushButton("Connect", self)
+        self.connect_button.setStyleSheet("color: gray;")
         self.connect_button.setEnabled(False)  # Disabled until devices are found
-        button_layout.addWidget(self.connect_button)
-
-        layout.addLayout(button_layout)
+        layout.addWidget(self.connect_button)
 
         # Signal-slot connection for the buttons
         self.connect_button.clicked.connect(self.connect_to_device)
@@ -93,6 +89,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
     def start_search(self):
         """Start searching for devices in the background thread."""
         self.device_dropdown.clear()  # Clear the dropdown list
+        self.connect_button.setStyleSheet("color: gray;")
         self.connect_button.setEnabled(False)  # Disable connect button while searching
         self.status_label.setText("Searching For Devices. Be Right Back...")  # Update status label
         self.search_button.setEnabled(False)  # Disable search button while searching
@@ -106,6 +103,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         """Load BLE devices into the dropdown list once the search is complete."""
         if devices:
             self.device_dropdown.addItems(devices)
+            self.connect_button.setStyleSheet("color: black;")
             self.connect_button.setEnabled(True)  # Enable connect button when devices are found
             self.status_label.setText(f"Found {len(devices)} device(s).")
         else:
@@ -117,6 +115,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         selected_device = self.device_dropdown.currentText()
         if selected_device:
             # Lock the buttons and show "Connecting to device..."
+            self.connect_button.setStyleSheet("color: gray;")
             self.connect_button.setEnabled(False)
             self.search_button.setEnabled(False)
             self.status_label.setText(f"Connecting to {selected_device}...")
@@ -132,6 +131,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         self.device_selected_signal.emit(success)
     
         # Re-enable the buttons after the attempt
+        self.connect_button.setStyleSheet("color: black;")
         self.connect_button.setEnabled(True)
         self.search_button.setEnabled(True)
 
@@ -149,6 +149,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
     def disconnect_from_device(self):
         """Attempt to disconnect the connected device."""
         # Lock the buttons and show "Disconnecting from device..."
+        self.connect_button.setStyleSheet("color: gray;")
         self.connect_button.setEnabled(False)
         self.search_button.setEnabled(False)
         self.status_label.setText(f"Disconnecting from {self.device_dropdown.currentText()}...")
@@ -164,6 +165,7 @@ class BluetoothConnectDialog(QtWidgets.QDialog):
         self.device_selected_signal.emit(success)
 
         # Re-enable the buttons after the attempt
+        self.connect_button.setStyleSheet("color: black;")
         self.connect_button.setEnabled(True)
         self.search_button.setEnabled(True)
 
