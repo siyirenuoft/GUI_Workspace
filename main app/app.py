@@ -1519,7 +1519,8 @@ class ActuatorCanvas(QGraphicsView):
         self.haptics_app.update_pushButton_5_state()
 
         # Immediately update the plotter by switching back to the main canvas
-        self.haptics_app.switch_to_main_canvas()
+        # self.haptics_app.switch_to_main_canvas()
+        self.haptics_app.update_plotter(actuator.id, actuator.actuator_type, actuator.color)
         self.haptics_app.update_actuator_text()
 
 
@@ -3738,8 +3739,8 @@ class Haptics_App(QtWidgets.QMainWindow):
         item = self.ui.treeWidget.itemAt(point)
         if item:
             menu = QtWidgets.QMenu(self)
-            delete_action = menu.addAction("Delete")
             rename_action = menu.addAction("Rename")
+            delete_action = menu.addAction("Delete")
 
             action = menu.exec(self.ui.treeWidget.mapToGlobal(point))
 
