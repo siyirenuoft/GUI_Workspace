@@ -381,6 +381,12 @@ class DesignSaver:
                 QMessageBox.information(None, "Success", "Design loaded successfully!")
                 self.app_reference.update_actuator_text()
                 self.app_reference.update_pushButton_5_state()
+
+                # After loading, reset the visualization mode and update the label
+                self.switch_to_main_canvas()
+                self.status_label.setText("Editing Waveform")
+                print("Editing Waveform")
+
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Failed to load design: {str(e)}")
 
@@ -1386,11 +1392,25 @@ class ActuatorCanvas(QGraphicsView):
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
 
-        elif event.button() == Qt.MouseButton.RightButton:  # Context menu for right-click
+        elif event.button() == Qt.MouseButton.RightButton:
             if isinstance(item, Actuator):
-                self.show_context_menu(item, event.pos())
+                # Check if this actuator is currently in timeline mode
+                if self.haptics_app.current_actuator == item.id:
+                    # 1. Deselect the actuator
+                    item.setSelected(False)
+
+                    # 2. Switch the timeline canvas back to Mpl
+                    self.haptics_app.switch_to_main_canvas()
+                    self.haptics_app.current_actuator = None
+
+                    # 3. Show context menu as normal
+                    self.show_context_menu(item, event.pos())
+                else:
+                    # Normal right-click behavior if not the currently displayed timeline actuator
+                    self.show_context_menu(item, event.pos())
             else:
                 self.no_actuator_selected.emit()
+
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -1648,49 +1668,182 @@ class ActuatorCanvas(QGraphicsView):
         self.fitInView(self.canvas_rect, Qt.AspectRatioMode.KeepAspectRatio)
 
     def create_actuator_branch(self, num_actuators, lra_count, vca_count, m_count, grid_pattern):
-        # Get the next branch letter
+        """
+        Creates a new branch of actuators arranged in a grid pattern.
+        Handles error cases where grid_pattern is missing or invalid.
+        Avoids overlapping new branches with existing actuators by shifting positions as needed.
+        Ensures all actuators remain within the canvas boundaries.
+
+        Parameters:
+            num_actuators (int): Total number of actuators to create in the branch.
+            lra_count (int): Number of LRA type actuators.
+            vca_count (int): Number of VCA type actuators.
+            m_count (int): Number of M type actuators.
+            grid_pattern (str): Grid pattern in 'rowsxcols' format (e.g., '2x3').
+        """
+        # Step 1: Determine the next branch letter
         if not self.actuators:
             next_branch = 'A'
         else:
-            max_branch = max(act.id.split('.')[0] for act in self.actuators if '.' in act.id)
-            next_branch = chr(ord(max_branch) + 1)
+            # Extract existing branch letters and determine the next one
+            existing_branches = [act.id.split('.')[0] for act in self.actuators if '.' in act.id]
+            max_branch = max(existing_branches) if existing_branches else 'A'
+            try:
+                next_branch = chr(ord(max_branch) + 1) if max_branch else 'A'
+            except ValueError:
+                # If max_branch is 'Z', wrap around or handle accordingly
+                next_branch = 'A'  # Simple wrap-around for example
 
-        # Parse grid pattern
-        rows, cols = map(int, grid_pattern.split('x'))
+        # Step 2: Handle grid_pattern parsing with error handling
+        if not grid_pattern or 'x' not in grid_pattern.lower():
+            # If grid_pattern is missing or doesn't contain 'x', set default grid
+            rows, cols = 1, 1
+            QMessageBox.warning(
+                self,
+                "Invalid Grid Pattern",
+                "Grid pattern is missing or invalid. Defaulting to 1x1 grid."
+            )
+        else:
+            try:
+                rows, cols = map(int, grid_pattern.lower().split('x'))
+                if rows <= 0 or cols <= 0:
+                    raise ValueError("Rows and columns must be positive integers.")
+            except ValueError as ve:
+                # If parsing fails, set default grid and notify the user
+                rows, cols = 1, 1
+                QMessageBox.warning(
+                    self,
+                    "Invalid Grid Pattern",
+                    f"Error parsing grid pattern '{grid_pattern}': {ve}. Defaulting to 1x1 grid."
+                )
 
-        calculated_size = min(self.canvas_rect.width() / (cols + 1), self.canvas_rect.height() / (rows + 1)) * 0.6
-        self.actuator_size = min(calculated_size, 20)
+        # Step 3: Calculate actuator size based on grid
+        try:
+            calculated_size = min(self.canvas_rect.width() / (cols + 1), self.canvas_rect.height() / (rows + 1)) * 0.6
+            self.actuator_size = min(calculated_size, 20)  # Maximum size capped at 20
+        except ZeroDivisionError:
+            # Handle division by zero if cols or rows are zero
+            self.actuator_size = 20
+            QMessageBox.warning(
+                self,
+                "Grid Calculation Error",
+                "Rows or columns cannot be zero. Setting actuator size to default value of 20."
+            )
 
-        # Calculate spacing
-        spacing_x = self.canvas_rect.width() / (cols + 1)
-        spacing_y = self.canvas_rect.height() / (rows + 1)
+        # Step 4: Calculate spacing between actuators
+        spacing_x = self.canvas_rect.width() / (cols + 1) if cols > 0 else self.canvas_rect.width()
+        spacing_y = self.canvas_rect.height() / (rows + 1) if rows > 0 else self.canvas_rect.height()
 
-        # Create actuators
+        # Step 5: Prepare actuator types and shuffle them for distribution
         actuator_types = ['LRA'] * lra_count + ['VCA'] * vca_count + ['M'] * m_count
         random.shuffle(actuator_types)
 
+        # Step 6: Calculate initial positions for new actuators
+        actuator_positions = []
         for i in range(num_actuators):
-            row = i // cols
-            col = i % cols
+            row = i // cols if cols else 0
+            col = i % cols if cols else 0
             x = spacing_x * (col + 1)
             y = spacing_y * (row + 1)
+            actuator_positions.append((x, y))
 
-            new_id = f"{next_branch}.{i+1}"
+        # Step 7: Determine bounding box of existing actuators to detect overlap
+        if self.actuators:
+            all_x = [act.pos().x() for act in self.actuators]
+            all_y = [act.pos().y() for act in self.actuators]
+            min_x_existing, max_x_existing = min(all_x), max(all_x)
+            min_y_existing, max_y_existing = min(all_y), max(all_y)
+        else:
+            # No existing actuators, no need to worry about overlap
+            min_x_existing = min_y_existing = max_x_existing = max_y_existing = 0
+
+        # Define a margin to consider for overlapping (in pixels)
+        margin = 20
+
+        # Step 8: Check for overlap and shift positions if necessary
+        overlap_detected = any(
+            (min_x_existing - margin <= x <= max_x_existing + margin and
+            min_y_existing - margin <= y <= max_y_existing + margin)
+            for (x, y) in actuator_positions
+        )
+
+        shift_x, shift_y = spacing_x, spacing_y  # Define how much to shift each iteration
+        max_shift_attempts = 10  # Prevent infinite loops
+        shift_attempts = 0
+
+        while overlap_detected and shift_attempts < max_shift_attempts:
+            # Shift all actuator positions by (shift_x, shift_y)
+            actuator_positions = [(x + shift_x, y + shift_y) for (x, y) in actuator_positions]
+
+            # Re-check for overlap after shifting
+            overlap_detected = any(
+                (min_x_existing - margin <= x <= max_x_existing + margin and
+                min_y_existing - margin <= y <= max_y_existing + margin)
+                for (x, y) in actuator_positions
+            )
+
+            # Check if any actuator is out of canvas bounds after shifting
+            out_of_bounds = False
+            for (x, y) in actuator_positions:
+                if not (0 + self.actuator_size / 2 <= x <= self.canvas_rect.width() - self.actuator_size / 2 and
+                        0 + self.actuator_size / 2 <= y <= self.canvas_rect.height() - self.actuator_size / 2):
+                    out_of_bounds = True
+                    break
+
+            if out_of_bounds:
+                # If shifting causes out-of-bounds, try shifting in the opposite direction
+                actuator_positions = [(x - 2 * shift_x, y - 2 * shift_y) for (x, y) in actuator_positions]
+                overlap_detected = any(
+                    (min_x_existing - margin <= x <= max_x_existing + margin and
+                    min_y_existing - margin <= y <= max_y_existing + margin)
+                    for (x, y) in actuator_positions
+                )
+                shift_attempts += 1
+                continue
+
+            shift_attempts += 1
+
+        if overlap_detected:
+            # If overlap still detected after maximum shifts, center the new branch
+            QMessageBox.information(
+                self,
+                "Overlap Adjustment",
+                "Could not completely avoid overlapping with existing actuators after multiple attempts. "
+                "Placing the new branch at the center of the canvas."
+            )
+            # Recalculate actuator positions centered on the canvas
+            center_x = self.canvas_rect.width() / 2
+            center_y = self.canvas_rect.height() / 2
+            for i in range(num_actuators):
+                row = i // cols if cols else 0
+                col = i % cols if cols else 0
+                x = center_x + spacing_x * (col - (cols - 1) / 2)
+                y = center_y + spacing_y * (row - (rows - 1) / 2)
+                # Ensure the actuator stays within canvas boundaries
+                x = max(self.actuator_size / 2, min(x, self.canvas_rect.width() - self.actuator_size / 2))
+                y = max(self.actuator_size / 2, min(y, self.canvas_rect.height() - self.actuator_size / 2))
+                actuator_positions[i] = (x, y)
+
+        # Step 9: Add actuators to the scene with final positions
+        for i, (x, y) in enumerate(actuator_positions):
+            new_id = f"{next_branch}.{i + 1}"
             actuator_type = actuator_types[i] if i < len(actuator_types) else 'LRA'
 
             predecessor = f"{next_branch}.{i}" if i > 0 else None
-            successor = f"{next_branch}.{i+2}" if i < num_actuators - 1 else None
+            successor = f"{next_branch}.{i + 2}" if i < num_actuators - 1 else None
 
             self.add_actuator(x, y, new_id, actuator_type, predecessor, successor)
 
-        self.actuator_size = 20
-        
+        # Step 10: Reset actuator size and update all actuators
+        self.actuator_size = 20  # Reset to default size
+
         for actuator in self.actuators:
             actuator.size = self.actuator_size
             actuator.update()
 
+        # Step 11: Refresh the scene and update UI elements
         self.update()
-        self.haptics_app.update_pushButton_5_state() # Update play button 
+        self.haptics_app.update_pushButton_5_state()  # Update the play button state
 
     
     def clear_canvas(self):
@@ -2785,7 +2938,49 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.ui.label_2.setStyleSheet("background-color: rgb(184, 199, 209);")
         self.ui.label_3.setStyleSheet("background-color: rgb(184, 199, 209);")
         self.ui.label_4.setStyleSheet("background-color: rgb(184, 199, 209);")
+
+
+        # Create the status label
+        self.mpl_status_label = QLabel("Editing Waveform", self)
+        self.mpl_status_label.setStyleSheet("""
+            QLabel {
+                font-size: 14px;
+                color: rgba(0, 0, 0, 1);
+                background-color: rgba(255, 255, 255, 255);  /* Transparent background */
+                padding: 5px;
+            }
+        """)
+        self.mpl_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self.mpl_status_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Make it non-interactive
+
+        # **Add these two lines to fix the truncation issue**
+        self.mpl_status_label.setMinimumWidth(150)  # Set a minimum width (adjust as needed)
+        self.mpl_status_label.setMinimumHeight(35)  
+        self.mpl_status_label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
         
+        # Position the label correctly
+        self.position_mpl_status_label()
+
+        # Ensure the label is on top of other widgets
+        self.mpl_status_label.raise_()
+
+
+    def position_mpl_status_label(self):
+        """Position the mpl_status_label at the top-right corner of the visualizer."""
+        # For Visulizer Labelling
+        
+        # Assume 'widget' is the container for MplCanvas and TimelineCanvas
+        visualizer_widget = self.ui.widget  # Adjust if your visualizer is in a different widget
+
+        # Get the geometry of the visualizer widget relative to the main window
+        geo = visualizer_widget.geometry()
+
+        # Calculate the top-right position with a 10-pixel padding
+        label_x = geo.x() + geo.width() - self.mpl_status_label.width() + 190
+        label_y = geo.y() + 50  # 10 pixels from the top
+
+        self.mpl_status_label.move(label_x, label_y)
+
 
     def update_time_label(self, current_time_position):
         """Update the label with the current time."""
@@ -3139,6 +3334,8 @@ class Haptics_App(QtWidgets.QMainWindow):
     def resizeEvent(self, event):
         """Override the resize event to update the timeline and slider when the window size changes."""
         super().resizeEvent(event)
+        self.position_mpl_status_label()
+        self.mpl_status_label.raise_()  # Keep it on top
         
         # Recalculate positions of timeline containers
         self.update_actuator_text()
@@ -3175,6 +3372,12 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.timeline_canvas.signals = self.actuator_signals[actuator_id]
             self.timeline_canvas.plot_all_signals()
 
+        # Update the status label
+        self.mpl_status_label.setText(f"Editing Unit {actuator_id}")
+        self.position_mpl_status_label()
+        self.mpl_status_label.show()
+        self.mpl_status_label.raise_()
+        
     def switch_to_main_canvas(self):
         # Check if already on MplCanvas, no need to switch if it is
         if self.ui.gridLayout.indexOf(self.maincanvas) != -1:
@@ -3188,6 +3391,12 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Add the MplCanvas back to the layout
         self.ui.gridLayout.addWidget(self.maincanvas, 0, 0, 1, 1)
         self.current_actuator = None  # Reset current actuator tracking
+
+        # Reset the status label
+        self.mpl_status_label.setText("Editing Waveform")
+        self.position_mpl_status_label()
+        self.mpl_status_label.show()
+        self.mpl_status_label.raise_()
 
     def on_actuator_clicked(self, actuator_id):
         # When an actuator is clicked, switch to the TimelineCanvas
