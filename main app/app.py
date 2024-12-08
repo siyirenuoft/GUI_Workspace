@@ -1520,17 +1520,33 @@ class ActuatorCanvas(QGraphicsView):
         action = menu.exec(self.mapToGlobal(pos))
         if action == edit_action:
             self.edit_actuator_properties(actuator)
+
         elif action == delete_action:
             selected_items = self.scene.selectedItems()
             if selected_items:
                 for item in selected_items:
                     if isinstance(item, Actuator):
+                        # Delete signals for each selected actuator
+                        if item.id in self.haptics_app.actuator_signals:
+                            del self.haptics_app.actuator_signals[item.id]
                         self.remove_actuator(item)
             else:
+                # Single actuator deletion
+                if actuator.id in self.haptics_app.actuator_signals:
+                    del self.haptics_app.actuator_signals[actuator.id]
                 self.remove_actuator(actuator)
-        elif action == clear_signal_action:  # Handle clearing the signal
-            self.clear_actuator_signal(actuator)
-    
+
+        elif action == clear_signal_action:
+            selected_items = self.scene.selectedItems()
+            if selected_items:
+                # Clear signals for all selected actuators
+                for item in selected_items:
+                    if isinstance(item, Actuator):
+                        self.clear_actuator_signal(item)
+            else:
+                # Clear signal for single actuator
+                self.clear_actuator_signal(actuator)
+
     def clear_actuator_signal(self, actuator):
         """Clear the corresponding signal for the actuator."""
         actuator_id = actuator.id
