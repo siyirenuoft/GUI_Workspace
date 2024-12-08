@@ -25,6 +25,8 @@ from utils import *
 from timeline_timer import TimelineTimer
 from signal_generator import OscillatorDialog, ChirpDialog, NoiseDialog, FMDialog, PWMDialog
 
+import copy
+
 class BluetoothDeviceSearchThread(QtCore.QThread):
     devices_found = QtCore.pyqtSignal(list)
 
@@ -2376,13 +2378,26 @@ class TimelineCanvas(FigureCanvas):
                     else:
                         self.record_signal(signal_type, signal_data, start_time, stop_time, parameters)
 
-        # After recording the new signal, update the plot
         if self.signals:
             self.plot_all_signals()
 
-        self.app_reference.actuator_signals[self.app_reference.current_actuator] = self.signals
+        # Create a deep copy of the signals to ensure each actuator gets its own independent set
+        final_signals = copy.deepcopy(self.signals)
+
+        # Get all selected actuators
+        selected_actuators = [act.id for act in self.app_reference.actuator_canvas.actuators if act.isSelected()]
+
+        # If no multiple selection, fallback to the current actuator
+        if not selected_actuators:
+            selected_actuators = [self.app_reference.current_actuator]
+
+        # Assign a separate copy of final_signals to each selected actuator
+        for actuator_id in selected_actuators:
+            self.app_reference.actuator_signals[actuator_id] = copy.deepcopy(final_signals)
+
         self.app_reference.update_actuator_text()
         self.app_reference.update_pushButton_5_state()
+
 
 
     def prompt_signal_parameters(self, signal_type):
@@ -2964,6 +2979,9 @@ class Haptics_App(QtWidgets.QMainWindow):
         # Ensure the label is on top of other widgets
         self.mpl_status_label.raise_()
 
+        # When init, hide the label
+        self.mpl_status_label.hide()
+
 
     def position_mpl_status_label(self):
         """Position the mpl_status_label at the top-right corner of the visualizer."""
@@ -3373,7 +3391,7 @@ class Haptics_App(QtWidgets.QMainWindow):
             self.timeline_canvas.plot_all_signals()
 
         # Update the status label
-        self.mpl_status_label.setText(f"Editing Unit {actuator_id}")
+        self.mpl_status_label.setText(f"Showing Unit {actuator_id}")
         self.position_mpl_status_label()
         self.mpl_status_label.show()
         self.mpl_status_label.raise_()
