@@ -2139,9 +2139,40 @@ class TimelineCanvas(FigureCanvas):
 
     # dragggg
     def mousePressEvent(self, event):
+        # Keep the original left-click dragging functionality
         if event.button() == Qt.MouseButton.LeftButton and self.signal_duration > 2:
             self._dragging = True
             self._last_mouse_x = event.position().x()
+
+        # Code for upper timeline canvas right click
+        # # Add new code for right-click context menu
+        # elif event.button() == Qt.MouseButton.RightButton:
+        #     pos = event.pos()
+        #     x_min, x_max = self.axes.get_xlim()
+        #     canvas_width = self.width()
+
+        #     # Convert the x-position of the mouse click into a time coordinate
+        #     time_position = x_min + (x_max - x_min) * (pos.x() / canvas_width) if canvas_width > 0 else 0
+
+        #     # Find which signal was clicked
+        #     clicked_signal = None
+        #     for signal in self.signals:
+        #         if signal["start_time"] <= time_position <= signal["stop_time"]:
+        #             clicked_signal = signal
+        #             break
+
+        #     if clicked_signal:
+        #         # Create and show a context menu
+        #         menu = QMenu(self)
+        #         info_action = menu.addAction("Show Signal Info")
+        #         selected_action = menu.exec(self.mapToGlobal(event.pos()))
+
+        #         if selected_action == info_action:
+        #             # Print information about the clicked signal and actuator
+        #             actuator_id = self.app_reference.current_actuator
+        #             signal_type = clicked_signal["type"]
+        #             print(f"Right-clicked on signal '{signal_type}' of actuator '{actuator_id}' at time {time_position:.3f}s.")
+
     # dragggg
     def mouseMoveEvent(self, event):
         if self._dragging and self.signal_duration > 2:
@@ -2753,8 +2784,17 @@ class FloatingVerticalSlider(QSlider):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.app_reference.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            self.app_reference.floating_slider.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
+            # Handle left click normally (e.g., drag)
             self.slider_start_pos = event.globalPosition().toPoint()
             super().mousePressEvent(event)
+
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.app_reference.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self.app_reference.floating_slider.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+
 
     def mouseMoveEvent(self, event):
         if not self.slider_movable:
@@ -3196,11 +3236,15 @@ class Haptics_App(QtWidgets.QMainWindow):
         self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.slider_layer.setGeometry(self.ui.scrollAreaWidgetContents.rect())
         self.slider_layer.setStyleSheet("background: transparent;")
+        # Make the layer is transparent of mouse click
+        self.slider_layer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         # Add a vertical slider to float over the timeline layout
         self.floating_slider = FloatingVerticalSlider(self.slider_layer, app_reference=self)
         self.floating_slider.setFixedHeight(self.ui.scrollAreaWidgetContents.height())
         self.floating_slider.update_movable_range()
+        # Make the slider is not transp of mouse click
+        self.floating_slider.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
 
         # Set the initial position 3 cm away from the left edge
         dpi = self.logicalDpiX()  # Get the screen DPI
@@ -3275,32 +3319,32 @@ class Haptics_App(QtWidgets.QMainWindow):
         right_offset = (OS_DEPENDENT_VALUE / 2.54) * dpi  # Convert 1 cm to pixels
 
         # Update the visual timeline for each actuator widget
+        ############################
         for actuator_id, (actuator_widget, actuator_label) in self.timeline_widgets.items():
-            # Remove all existing signal widgets from the actuator widget layout, but keep the ID and type
+            # Clear existing signal widgets
             for i in reversed(range(1, actuator_widget.layout().count())):
                 item = actuator_widget.layout().takeAt(i)
                 widget = item.widget()
                 if widget:
                     widget.deleteLater()
                 else:
-                    del item  # Remove spacers
-
-            # Set up the layout for the actuator widget if not already done
+                    del item
+            
+            # Ensure layout is set
             if not actuator_widget.layout():
                 layout = QtWidgets.QHBoxLayout()
                 actuator_widget.setLayout(layout)
                 layout.setContentsMargins(0, 0, 0, 0)
-                layout.setSpacing(5)  # Add spacing between the ID/Type and the signals
+                layout.setSpacing(5)
 
-            # Ensure the ID/Type label stays in the first position
+            # Ensure the ID/Type label is in position 0
             if actuator_label.parent() is None:
                 actuator_widget.layout().insertWidget(0, actuator_label)
-            
+
             # Check if the actuator has signals
             if actuator_id in self.actuator_signals:
                 signals = self.actuator_signals[actuator_id]
 
-                # Create a container for the timeline and signal widgets
                 timeline_container = QtWidgets.QWidget(actuator_widget)
                 timeline_container.setStyleSheet("background-color: transparent;")
                 timeline_container.setFixedHeight(30)
@@ -3308,38 +3352,34 @@ class Haptics_App(QtWidgets.QMainWindow):
                 timeline_layout.setContentsMargins(0, 0, 0, 0)
                 timeline_layout.setSpacing(0)
 
-                # Calculate the available width of the actuator widget after applying the offsets
-                widget_width = actuator_widget.size().width() - left_offset - right_offset  # Subtract both offsets
-
-                # Track the last stop time to insert gaps
+                widget_width = actuator_widget.size().width() - left_offset - right_offset
                 last_stop_time = 0
 
                 # Sort signals by start time
                 signals.sort(key=lambda signal: signal["start_time"])
 
                 for signal in signals:
-                    # Calculate the relative width of the signal widget based on its duration
+                    # Calculate sizes and positions
                     signal_duration = signal["stop_time"] - signal["start_time"]
                     signal_width_ratio = signal_duration / global_total_time
                     signal_width = int(signal_width_ratio * widget_width)
 
-                    # Calculate the relative starting position of the signal widget
                     signal_start_ratio = signal["start_time"] / global_total_time
-                    signal_start_position = int(signal_start_ratio * widget_width) + left_offset  # Add the 3 cm offset
+                    signal_start_position = int(signal_start_ratio * widget_width) + left_offset
 
-                    # If there is a gap between the last signal's stop time and this signal's start time, add a spacer
+                    # Add spacer if there's a gap
                     if signal["start_time"] > last_stop_time:
                         gap_duration = signal["start_time"] - last_stop_time
                         gap_width_ratio = gap_duration / global_total_time
                         gap_width = int(gap_width_ratio * widget_width)
-
-                        # Add a spacer to represent the gap
                         spacer = QtWidgets.QSpacerItem(gap_width, 30, QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Minimum)
                         timeline_layout.addItem(spacer)
 
-                    # Create the signal widget, making it smaller vertically and with rounded corners
-                    signal_widget = QtWidgets.QLabel(f'{signal["type"]} ({", ".join([f"{k}: {v}" for k, v in (signal["parameters"] or {}).items()])})')
-                    signal_widget.setFixedSize(signal_width, 30)  # Set smaller height for the signal widget
+                    # Create the signal widget
+                    signal_params = ", ".join([f"{k}: {v}" for k, v in (signal["parameters"] or {}).items()])
+                    signal_text = f'{signal["type"]} ({signal_params})'
+                    signal_widget = QtWidgets.QLabel(signal_text)
+                    signal_widget.setFixedSize(signal_width, 30)
                     signal_widget.setStyleSheet("""
                         background-color: rgba(100, 150, 250, 150); 
                         color: white; 
@@ -3347,23 +3387,38 @@ class Haptics_App(QtWidgets.QMainWindow):
                         padding: 3px;
                     """)
 
-                    # Add the signal widget to the layout
+                    # Store the actuator_id and signal info for reference
+                    signal_widget.setProperty("actuator_id", actuator_id)
+                    signal_widget.setProperty("signal_info", signal)
+
+                    # Enable custom context menu
+                    signal_widget.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+                    signal_widget.customContextMenuRequested.connect(lambda pos, w=signal_widget: self.show_signal_context_menu(w, pos))
+
                     timeline_layout.addWidget(signal_widget)
-                    # Lower the signal widget to the bottom layer
                     signal_widget.lower()
 
-                    # Update the last stop time
                     last_stop_time = signal["stop_time"]
 
-                # Add a stretch to fill the remaining space
                 timeline_layout.addStretch()
-
-                # Add the timeline container to the actuator widget after the ID and type
                 actuator_widget.layout().addWidget(timeline_container)
                 timeline_container.updateGeometry()
-
+        #################################
         # After adding all timeline widgets, ensure the slider layer stays on top
         self.raise_slider_layer()
+
+    def show_signal_context_menu(self, signal_widget, pos):
+        """Show the context menu for the clicked signal widget."""
+        actuator_id = signal_widget.property("actuator_id")
+        signal = signal_widget.property("signal_info")
+
+        menu = QMenu(signal_widget)
+        info_action = menu.addAction("Show Signal Info")
+        selected_action = menu.exec(signal_widget.mapToGlobal(pos))
+
+        if selected_action == info_action:
+            # Print message in the command prompt
+            print(f"Right-clicked on signal '{signal['type']}' of actuator '{actuator_id}'")
 
     def resizeEvent(self, event):
         """Override the resize event to update the timeline and slider when the window size changes."""
