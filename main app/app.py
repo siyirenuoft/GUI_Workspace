@@ -2009,43 +2009,59 @@ class ActuatorPropertiesDialog(QDialog):
         else:
             return ""
 
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QLabel, QSpinBox, QLineEdit,
+    QDialogButtonBox, QMessageBox
+)
+from PyQt6.QtCore import Qt
+
 class CreateBranchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create Actuator Branch")
         layout = QVBoxLayout(self)
 
+        # Number of Actuators
         self.num_actuators_input = QSpinBox()
         self.num_actuators_input.setMinimum(1)
         self.num_actuators_input.valueChanged.connect(self.update_max_counts)
         layout.addWidget(QLabel("Number of Actuators:"))
         layout.addWidget(self.num_actuators_input)
 
+        # LRA Count
         self.lra_input = QSpinBox()
         self.lra_input.valueChanged.connect(self.check_total)
         layout.addWidget(QLabel("LRA Count:"))
         layout.addWidget(self.lra_input)
 
+        # VCA Count
         self.vca_input = QSpinBox()
         self.vca_input.valueChanged.connect(self.check_total)
         layout.addWidget(QLabel("VCA Count:"))
         layout.addWidget(self.vca_input)
 
+        # M Count
         self.m_input = QSpinBox()
         self.m_input.valueChanged.connect(self.check_total)
         layout.addWidget(QLabel("M Count:"))
         layout.addWidget(self.m_input)
 
+        # Grid Pattern
         self.grid_pattern_input = QLineEdit()
+        self.grid_pattern_input.setPlaceholderText("e.g., 2x2, 3x3")
         self.grid_pattern_input.textChanged.connect(self.validate_inputs)
         layout.addWidget(QLabel("Grid Pattern (e.g., 2x2, 3x3):"))
         layout.addWidget(self.grid_pattern_input)
 
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        # Dialog Buttons
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         layout.addWidget(self.button_box)
 
+        # Initialize default values
         self.num_actuators_input.setValue(1)
         self.update_max_counts()
         self.validate_inputs()
@@ -2064,11 +2080,12 @@ class CreateBranchDialog(QDialog):
         
         if sum_counts > total:
             diff = sum_counts - total
-            if self.sender() == self.lra_input:
+            sender = self.sender()
+            if sender == self.lra_input:
                 self.lra_input.setValue(max(0, self.lra_input.value() - diff))
-            elif self.sender() == self.vca_input:
+            elif sender == self.vca_input:
                 self.vca_input.setValue(max(0, self.vca_input.value() - diff))
-            elif self.sender() == self.m_input:
+            elif sender == self.m_input:
                 self.m_input.setValue(max(0, self.m_input.value() - diff))
             
             # Recalculate sum_counts after adjustment
@@ -2080,13 +2097,22 @@ class CreateBranchDialog(QDialog):
         if (self.lra_input.value() + self.vca_input.value() + self.m_input.value() == self.num_actuators_input.value() and
             self.validate_grid_pattern(self.grid_pattern_input.text())):
             super().accept()
+        else:
+            QMessageBox.warning(
+                self,
+                "Invalid Input",
+                "Please ensure that:\n"
+                "1. The sum of LRA, VCA, and M counts equals the number of actuators.\n"
+                "2. The Grid Pattern is provided and in a valid format (e.g., 2x2, 3x3).",
+                QMessageBox.StandardButton.Ok
+            )
 
     def validate_grid_pattern(self, pattern):
-        if not pattern.strip():  # Allow empty pattern
-            return True
+        if not pattern.strip():  # Disallow empty pattern
+            return False
         try:
-            rows, cols = map(int, pattern.split('x'))
-            return rows > 0 and cols > 0  # Just check if it's a valid grid format
+            rows, cols = map(int, pattern.lower().split('x'))
+            return rows > 0 and cols > 0  # Check if it's a valid grid format
         except ValueError:
             return False
         
@@ -2101,6 +2127,7 @@ class CreateBranchDialog(QDialog):
         is_valid = counts_valid and grid_valid
         
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(is_valid)
+
 
 class TimelineCanvas(FigureCanvas):
 
