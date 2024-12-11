@@ -1165,7 +1165,45 @@ class ActuatorCanvas(QGraphicsView):
 
         self.scene.selectionChanged.connect(self.handle_selection_change)
 
+        # Initialize a list to track the order of selected actuators
+        self.selected_actuators_order = []
+
+        # Initialize a set to track currently selected actuators for quick lookup
+        self.current_selected_actuators = set()
+
+
     def handle_selection_change(self):
+        print("Entered handle_selection_change")
+        # Get the new selection as a set
+        new_selected = set(
+            item for item in self.scene.selectedItems() if isinstance(item, Actuator)
+        )
+
+        # Determine newly selected and newly deselected actuators
+        added = new_selected - self.current_selected_actuators
+        removed = self.current_selected_actuators - new_selected
+
+        # Update the selection order list
+        for actuator in added:
+            self.selected_actuators_order.append(actuator)
+
+        for actuator in removed:
+            if actuator in self.selected_actuators_order:
+                self.selected_actuators_order.remove(actuator)
+
+        # Emit signals based on the updated selection
+        if self.selected_actuators_order:
+            # The last actuator in the list is the most recently selected
+            last_selected = self.selected_actuators_order[-1]
+            # Emit the clicked signal for the last selected actuator
+            last_selected.signal_handler.clicked.emit(last_selected.id)
+        else:
+            # No actuators are selected
+            self.no_actuator_selected.emit()
+
+        # Update the current selection set
+        self.current_selected_actuators = new_selected
+
         # Force an update on the scene to repaint the actuators
         for item in self.scene.selectedItems():
             item.update()  # Ensure selected items are redrawn
