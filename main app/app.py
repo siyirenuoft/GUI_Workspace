@@ -1451,8 +1451,10 @@ class ActuatorCanvas(QGraphicsView):
             else:
                 self.no_actuator_selected.emit()
 
-            super().mousePressEvent(event)
 
+            event.accept()  # Prevent further processing
+
+    
     def mouseMoveEvent(self, event):
         if self.panning:
             delta = event.pos() - self.last_pan_point
